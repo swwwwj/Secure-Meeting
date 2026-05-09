@@ -1,325 +1,98 @@
-# Secure Meeting
+Secure Meeting：具备主动防御能力的实时视频会议系统
+本项目旨在构建一套集成主动隐私防御能力的实时视频会议系统，通过深度整合 RTC 通信技术与计算机视觉算法，解决传统视频会议在生物特征泄露、环境隐私及无关人员干扰方面的安全痛点。
 
-## 1. Overview
+核心解决痛点
 
-Secure Meeting is a video processing and conferencing system with privacy protection capabilities.
-The system enhances video streams using computer vision and adversarial perturbation techniques to protect user identity and sensitive information.
+- 特征识别风险高：防止原始生物特征在传输或采集端被恶意抓取
 
-The system is designed to be built incrementally, starting from a single-machine pipeline and later extending to real-time communication.
+- 主动防御能力弱：实现针对 AI 大模型的“防训练、防识别、防换脸”安全目标
 
----
+- 环境隐私与无关人员受牵连：自动识别并遮蔽关键物理隐私及非参会第三方
 
-## 2. System Architecture
+功能特性
 
-The system is composed of three independent components:
+基于任务书的开发计划，系统核心功能涵盖：
 
-```id="arch1"
-Client (C++)
-    ↔ AI Service (Python)
-    ↔ Meeting Server (Python, optional in early stage)
-```
+- 面部生物特征加扰（云端）：在云端为参会者叠加对抗性扰动，防御换脸与识别攻击
 
-### Design Principles
+- 敏感物体遮蔽（本地）：利用 YOLO 模型实时检测并虚化证件、门牌等特定物体
 
-* Real-time tasks stay in the client
-* Heavy computation is handled by AI service
-* All components communicate via clear APIs
-* Each component must be runnable independently
+- 无关人员保护（本地）：利用 ArcFace 识别白名单，自动模糊非参会人员肖像
 
----
+- 实时音视频通信：基于低延迟 RTC 协议，确保高清晰度的双向交互
 
-## 3. Development Strategy (Critical)
+- 虚拟摄像头映射：提供标准驱动接口，支持将增强后的隐私流输出至第三方平台
 
-The system must be implemented in phases:
+系统架构：端云协同模式
 
-### Phase 1 (MVP - REQUIRED FIRST)
+系统采用端云协同的分布式架构，旨在平衡计算开销与实时性需求。
 
-Single-machine pipeline:
+模块层级详情
 
-```id="flow1"
-Camera → Client → AI Service → Client Display
-```
+模块层级
 
-No networking, no RTC.
+部署位置
 
----
+核心职能
 
-### Phase 2
+技术堆栈
 
-* Add detection (YOLO)
-* Add face recognition (ArcFace)
-* Add ROI extraction
+客户端层
 
----
+用户本地 PC
 
-### Phase 3
+视频采集、物理环境初滤、ROI 区域提取
 
-* Add adversarial perturbation
-* Improve processing pipeline
+YOLO, ArcFace, 虚拟驱动
 
----
+服务端层
 
-### Phase 4 (Optional / Advanced)
+云端算力中心
 
-* Add RTC communication
-* Add meeting server
+高强度对抗性加扰、用户鉴权、媒体转发
 
----
+高性能 GPU 节点, 对抗算法
 
-## 4. Responsibilities
+通信层
 
-### 4.1 Client (C++)
+网络链路
 
-Responsibilities:
+50ms RTT 延迟控制、加密切片上传
 
-* Capture frames from camera
-* Send frames to AI service
-* Receive processed frames
-* Display video
+加密 RTC 传输协议
 
-Do NOT implement:
+核心处理流程
 
-* YOLO
-* ArcFace
-* Adversarial algorithms
+1. 本地预处理：本地引擎执行面部区域（ROI）精准提取。
 
----
+2. 数据优化传输：系统仅将加密后的极小尺寸人脸切片上传至云端，而非全帧画面，大幅降低带宽压力。
 
-### 4.2 AI Service (Python)
+3. 云端加扰：利用云端 GPU 生成对抗性扰动。
 
-Responsibilities:
+4. 合成分发：本地脱敏流与云端加扰流同步合成，通过媒体服务器路由分发。
 
-* Receive image/frame
-* Run detection / recognition
-* Apply perturbation
-* Return processed frame
+性能指标
 
-Must expose HTTP API.
+- 网络延迟：确保在 RTT 50ms 限制下运行
 
----
+- 帧率体验：实现 30fps 的流畅视频通信
 
-### 4.3 Meeting Server (Python)
+- 同步性：通过降低 AI 推理时间，确保公网环境下音视频高度同步
 
-Responsibilities:
+开发路线图 (Roadmap)
 
-* Room management
-* Signaling
-
-This module is NOT required in Phase 1.
+1. 迭代一：完成敏感物体遮蔽、无关人员保护及基础会议管理
 
----
+2. 迭代二：实现云端面部对抗性加扰、端云协同调度及实时 RTC 优化
 
-## 5. API Specification (MANDATORY)
+3. 迭代三：交付虚拟摄像头映射接口及用户个人隐私配置模块
 
-### AI Service API
+团队成员
 
-#### Endpoint
+- 代码负责人：核心 AI 算子、通信协议及端云协同链路开发
 
-```
-POST /process_frame
-POST /api/v1/process_frame
-```
+- 设计负责人：交互逻辑设计、隐私配置界面及视觉自然度优化
 
-#### Request
+- 部署负责人：基础设施搭建、虚拟驱动开发及算力调度部署
 
-* Content-Type: application/json or multipart/form-data
-
-Example (base64):
-
-```json
-{
-  "image": "<base64_encoded_image>",
-  "request_id": "optional-client-request-id",
-  "trace_id": "optional-trace-id",
-  "model_version": "optional-override",
-  "policy_version": "optional-override"
-}
-```
-
----
-
-#### Response
-
-```json
-{
-  "request_id": "<resolved_request_id>",
-  "trace_id": "<resolved_trace_id>",
-  "model_version": "<resolved_model_version>",
-  "policy_version": "<resolved_policy_version>",
-  "image": "<base64_encoded_processed_image>",
-  "latency_ms": 12.34
-}
-```
-
-Legacy compatibility:
-
-```json
-POST /process_frame
-{"image": "..."}
--> {"image": "..."}
-```
-
----
-
-### Requirements
-
-* Must support single frame processing
-* Must be stateless
-* Response time should be minimized
-
----
-
-## 6. Data Flow (MVP)
-
-```id="flow2"
-1. Capture frame (C++)
-2. Encode to base64
-3. Send to AI service (HTTP)
-4. AI processes frame
-5. Return processed image
-6. Decode and display
-```
-
----
-
-## 7. Project Structure
-
-```id="struct1"
-secure-meeting/
-│
-├── client/
-│   ├── capture/
-│   ├── network/
-│   ├── display/
-│   └── main.cpp
-│
-├── ai_service/
-│   ├── api/
-│   ├── detection/
-│   ├── face/
-│   ├── perturbation/
-│   └── app.py
-│
-├── server/         # optional
-│
-└── README.md
-```
-
----
-
-## 8. Implementation Requirements
-
-### General
-
-* Each module must compile/run independently
-* Avoid monolithic code
-* Use clear interfaces
-
----
-
-### Client
-
-* Use OpenCV for video capture
-* Use HTTP client library to call AI service
-
----
-
-### AI Service
-
-* Use FastAPI
-* Use OpenCV for image handling
-* Use PyTorch for models (later stages)
-
----
-
-## 9. Performance Targets
-
-* Target FPS: 20–30 (Phase 1 acceptable ≥15)
-* Processing latency: as low as possible
-* System must not block UI thread
-
----
-
-## 10. Constraints
-
-* Do not implement all features at once
-* Do not introduce RTC before pipeline works
-* Do not tightly couple client and AI logic
-* Keep modules replaceable
-
----
-
-## 11. Minimal Deliverable (Definition of Done)
-
-Phase 1 is complete when:
-
-* Camera feed is displayed
-* Frames are sent to AI service
-* AI service returns modified frames
-* Processed video is shown in real-time
-
----
-
-## 12. Extension Goals
-
-After MVP:
-
-* Add YOLO detection
-* Add ArcFace recognition
-* Add adversarial perturbation
-* Add RTC communication
-* Add multi-user support
-
----
-
-## Phase A Productization Notes
-
-- Environment config:
-  - `ai_service/config/dev.json|test.json|prod.json`
-  - `client/config/dev.json|test.json|prod.json`
-  - override via env: `SM_ENV`, `SM_AI_ENDPOINT`, `SM_MODEL_VERSION`, `SM_POLICY_VERSION`
-- Observability:
-  - structured JSON logs on client and AI service
-  - local metrics endpoint: `GET /api/v1/metrics`
-- Test:
-  - run `python -m pytest` in `ai_service/`
-  - covers success, invalid payload, forced error, delay path, and legacy compatibility
-
----
-
-## Phase B Meeting Server MVP
-
-- New module: `meeting_server/`
-- Capabilities:
-  - `POST /api/v1/auth/register`
-  - `POST /api/v1/auth/login`
-  - `POST /api/v1/auth/logout`
-  - `POST /api/v1/rooms/create`
-  - `POST /api/v1/rooms/join`
-  - `POST /api/v1/rooms/leave`
-  - `POST /api/v1/signaling/message` (placeholder)
-  - `POST /api/v1/rooms/policy` (policy-change placeholder)
-- Database:
-  - Dev default uses SQLite (`sqlite:///./meeting_server_dev.db`), so local run does not require PostgreSQL
-  - Test uses SQLite; Prod can use PostgreSQL by setting `SM_MEETING_DATABASE_URL`
-  - Migration tool: Alembic (`meeting_server/alembic/`)
-  - Initial migration creates: `users`, `rooms`, `participants`, `sessions`, `audit_logs`
-  - Auth hardening migration adds: `users.password_hash`, `sessions.revoked_at`
-- Run migration:
-  - `cd meeting_server`
-  - `alembic upgrade head`
-- Run tests:
-  - `python -m pytest`
-
-- Dev startup (no PostgreSQL required):
-  - `cd meeting_server`
-  - `python -m alembic upgrade head`
-  - PowerShell one-liner:
-    - `$env:SM_ENV='dev'; python -m uvicorn app:app --host 127.0.0.1 --port 8100`
-  - Optional switch to PostgreSQL:
-    - `$env:SM_MEETING_DATABASE_URL='postgresql+psycopg://user:password@127.0.0.1:5432/secure_meeting'`
-
-- Client real-service path:
-  - default `client/config/dev.json` sets `"use_mock_services": false`
-  - uses `meeting_server_endpoint` + `x-session-token` for room APIs
-  - set `SM_USE_MOCK_SERVICES=true` to rollback to mock services
+- 测试负责人：模型准确率验证、网络延迟监控及兼容性测试
