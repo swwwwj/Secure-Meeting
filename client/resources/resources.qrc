@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>theme.qss</file>
+        <file>icons/camera.svg</file>
+        <file>icons/camera-off.svg</file>
+        <file>icons/mic.svg</file>
+        <file>icons/mic-off.svg</file>
+        <file>icons/shield.svg</file>
+        <file>icons/phone-off.svg</file>
+        <file>icons/logo.svg</file>
+        <file>icons/plus.svg</file>
+    </qresource>
+</RCC>

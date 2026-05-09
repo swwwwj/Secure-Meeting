@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": 8000,
+  "api_prefix": "/api/v1",
+  "default_mode": "grayscale",
+  "model_version": "demo-model-v1",
+  "policy_version": "policy-default-v1",
+  "enable_metrics_log": true,
+  "metrics_log_every_n": 20,
+  "enable_debug_controls": true
+}

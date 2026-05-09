@@ -1,0 +1,6 @@
+E:/Secure_Meeting/build/CMakeFiles/edit_cache.dir
+E:/Secure_Meeting/build/CMakeFiles/rebuild_cache.dir
+E:/Secure_Meeting/build/client/CMakeFiles/SecureMeetingClient.dir
+E:/Secure_Meeting/build/client/CMakeFiles/edit_cache.dir
+E:/Secure_Meeting/build/client/CMakeFiles/rebuild_cache.dir
+E:/Secure_Meeting/build/client/CMakeFiles/SecureMeetingClient_autogen.dir

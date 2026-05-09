@@ -1,0 +1,11 @@
+{
+  "ai_endpoint": "http://127.0.0.1:8000/api/v1/process_frame",
+  "meeting_server_endpoint": "http://127.0.0.1:8100",
+  "use_mock_services": false,
+  "ai_enabled_by_default": false,
+  "ai_timeout_ms": 1200,
+  "meeting_timeout_ms": 1500,
+  "max_in_flight_requests": 2,
+  "model_version": "demo-model-v1",
+  "policy_version": "policy-default-v1"
+}

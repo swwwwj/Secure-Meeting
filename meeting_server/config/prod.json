@@ -1,0 +1,8 @@
+{
+  "host": "0.0.0.0",
+  "port": 8100,
+  "api_prefix": "/api/v1",
+  "database_url": "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/secure_meeting",
+  "enable_meeting_server": true,
+  "enable_signaling_placeholder": true
+}

@@ -1,0 +1,31 @@
+#pragma once
+
+#include <QWidget>
+#include <QImage>
+
+class QLabel;
+class QResizeEvent;
+
+class VideoWidget : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit VideoWidget(const QString &participant, QWidget *parent = nullptr);
+
+    void setParticipantName(const QString &name);
+    void setFrame(const QImage &frame);
+    void clearFrame();
+    void setMediaState(bool cameraOn, bool microphoneOn);
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
+private:
+    void refreshFrame();
+
+    QLabel *m_canvas;
+    QLabel *m_nameChip;
+    QLabel *m_camChip;
+    QLabel *m_micChip;
+    QImage m_lastFrame;
+};
