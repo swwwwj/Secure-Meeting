@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ai-service-tests:
+    name: AI Service Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai_service/requirements.txt
+
+      - name: Install dependencies
+        working-directory: ai_service
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: ai_service
+        run: python -m pytest
+
+  meeting-server-tests:
+    name: Meeting Server Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: meeting_server/requirements.txt
+
+      - name: Install dependencies
+        working-directory: meeting_server
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: meeting_server
+        run: python -m pytest
