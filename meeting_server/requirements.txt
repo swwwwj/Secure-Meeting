@@ -4,5 +4,6 @@ sqlalchemy
 alembic
 psycopg[binary]
 passlib[bcrypt]
+bcrypt<5
 pytest
 httpx
