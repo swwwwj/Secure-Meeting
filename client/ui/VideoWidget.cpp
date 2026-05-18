@@ -73,5 +73,5 @@ void VideoWidget::refreshFrame()
     if (size.isEmpty()) return;
     m_canvas->setText(QString());
     m_canvas->setPixmap(QPixmap::fromImage(
-        m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation)));
+        m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::FastTransformation)));
 }

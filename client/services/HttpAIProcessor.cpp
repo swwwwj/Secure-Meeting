@@ -39,10 +39,12 @@ void HttpAIProcessor::processFrame(const QImage &frame)
 {
     m_framesIn += 1;
 
-    if (!m_enabled || !m_endpoint.isValid()) {
-        if (!m_enabled) {
-            logEvent("ai_bypass", {{"reason", "disabled"}});
-        }
+    if (!m_enabled) {
+        emit frameProcessed(frame);
+        return;
+    }
+
+    if (!m_endpoint.isValid()) {
         emit frameProcessed(frame);
         return;
     }
