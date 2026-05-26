@@ -71,3 +71,8 @@ desktop.ini
 
 # Local assistant/tooling state
 .claude/
+
+# YOLO training data and runs (keep code, ignore local datasets/weights)
+ai_service/training/datasets/
+ai_service/training/runs/
+ai_service/*.pt

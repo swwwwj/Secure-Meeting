@@ -1,0 +1,17 @@
+# YOLO dataset config — single class: id_card (身份证)
+# Paths are relative to this file's directory.
+#
+# Prepare data:
+#   python -m training.prepare_id_card_dataset --init
+#   python -m training.prepare_id_card_dataset --source path/to/raw_images_and_labels
+#
+# Validate:
+#   python -m training.validate_id_card_dataset
+
+path: datasets/id_card
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  0: id_card

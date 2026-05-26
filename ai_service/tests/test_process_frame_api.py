@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 
 def _make_image_b64() -> str:
-    img = np.zeros((24, 24, 3), dtype=np.uint8)
-    img[:, :, 0] = 20
-    img[:, :, 1] = 140
-    img[:, :, 2] = 220
+    img = np.zeros((48, 48, 3), dtype=np.uint8)
+    for y in range(img.shape[0]):
+        for x in range(img.shape[1]):
+            img[y, x, 0] = (x * 5 + y * 2) % 255
+            img[y, x, 1] = (x * 3 + 40) % 255
+            img[y, x, 2] = (y * 4 + 80) % 255
     ok, encoded = cv2.imencode(".png", img)
     assert ok
     return base64.b64encode(encoded.tobytes()).decode("utf-8")
@@ -26,9 +28,14 @@ def _decode_image(image_b64: str) -> np.ndarray:
 
 
 def _client() -> TestClient:
+    os.environ.pop("SM_ENV", None)
     os.environ.pop("SM_MODEL_VERSION", None)
     os.environ.pop("SM_POLICY_VERSION", None)
     os.environ.pop("SM_API_PREFIX", None)
+    os.environ.pop("SM_DETECTOR_PROVIDER", None)
+    os.environ.pop("SM_DETECTOR_DEVICE", None)
+    os.environ.pop("SM_YOLO_MODEL_PATH", None)
+    os.environ.pop("SM_SENSITIVE_LABELS", None)
     os.environ["SM_ENV"] = "test"
     mod = importlib.import_module("app")
     importlib.reload(mod)
@@ -36,6 +43,7 @@ def _client() -> TestClient:
 
 
 def _client_with_overrides(**env_vars: str) -> TestClient:
+    _client()
     os.environ["SM_ENV"] = "test"
     for key, value in env_vars.items():
         os.environ[key] = value
@@ -46,7 +54,7 @@ def _client_with_overrides(**env_vars: str) -> TestClient:
 
 def test_process_frame_v1_success():
     client = _client()
-    payload = {"image": _make_image_b64(), "mode": "grayscale", "request_id": "req-1", "trace_id": "trace-1"}
+    payload = {"image": _make_image_b64(), "mode": "pass", "request_id": "req-1", "trace_id": "trace-1"}
     resp = client.post("/api/v1/process_frame", json=payload)
     assert resp.status_code == 200
     body = resp.json()
@@ -55,10 +63,11 @@ def test_process_frame_v1_success():
     assert body["model_version"]
     assert body["policy_version"]
     assert body["latency_ms"] >= 0
+    assert body["blurred_count"] >= 1
+    assert isinstance(body["detections"], list)
     out = _decode_image(body["image"])
-    # Regression baseline: grayscale output should have equal channels.
-    assert np.array_equal(out[:, :, 0], out[:, :, 1])
-    assert np.array_equal(out[:, :, 1], out[:, :, 2])
+    # Sensitive "id_card" region should be blurred under mock detector path.
+    assert not np.array_equal(out, _decode_image(payload["image"]))
 
 
 def test_process_frame_v1_invalid_payload():
@@ -110,3 +119,38 @@ def test_config_override_from_env():
     body = resp.json()
     assert body["model_version"] == "override-model"
     assert body["policy_version"] == "override-policy"
+
+
+def test_sensitive_list_miss_keeps_image_clear():
+    client = _client_with_overrides(SM_SENSITIVE_LABELS='["cell phone"]')
+    source = _make_image_b64()
+    resp = client.post("/api/v1/process_frame", json={"image": source, "mode": "pass"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["blurred_count"] == 0
+    out = _decode_image(body["image"])
+    original = _decode_image(source)
+    assert np.array_equal(out, original)
+
+
+def test_sensitive_list_empty_disables_blur():
+    client = _client_with_overrides(SM_SENSITIVE_LABELS="[]")
+    source = _make_image_b64()
+    resp = client.post("/api/v1/process_frame", json={"image": source, "mode": "pass"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["blurred_count"] == 0
+    assert body["detections"] == []
+    out = _decode_image(body["image"])
+    assert np.array_equal(out, _decode_image(source))
+
+
+def test_detector_failure_degrades_to_passthrough():
+    client = _client_with_overrides(SM_DETECTOR_PROVIDER="yolo", SM_YOLO_MODEL_PATH="./non-existing-model.pt")
+    source = _make_image_b64()
+    resp = client.post("/api/v1/process_frame", json={"image": source, "mode": "pass"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["blurred_count"] == 0
+    out = _decode_image(body["image"])
+    assert np.array_equal(out, _decode_image(source))

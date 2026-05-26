@@ -5,13 +5,15 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from pipeline import MockDetector, RegionProtector, SensitiveObjectPipeline, UnavailableDetector, YOLODetector
 
 
 class ServiceConfig(BaseModel):
@@ -25,6 +27,17 @@ class ServiceConfig(BaseModel):
     enable_metrics_log: bool = True
     metrics_log_every_n: int = 30
     enable_debug_controls: bool = True
+    detector_provider: Literal["mock", "yolo"] = "mock"
+    detector_device: str = "cpu"
+    yolo_model_path: str = "yolov8n.pt"
+    detection_confidence_threshold: float = 0.35
+    inference_image_size: int = 640
+    detector_timeout_ms: int = 200
+    detect_every_n_frames: int = 1
+    bbox_smoothing_alpha: float = 0.7
+    blur_method: Literal["gaussian", "mosaic"] = "gaussian"
+    blur_intensity: int = 17
+    sensitive_labels: list[str] = Field(default_factory=list)
 
 
 def _load_config() -> ServiceConfig:
@@ -41,6 +54,17 @@ def _load_config() -> ServiceConfig:
         data["policy_version"] = os.getenv("SM_POLICY_VERSION")
     if os.getenv("SM_API_PREFIX"):
         data["api_prefix"] = os.getenv("SM_API_PREFIX")
+    if os.getenv("SM_DETECTOR_PROVIDER"):
+        data["detector_provider"] = os.getenv("SM_DETECTOR_PROVIDER")
+    if os.getenv("SM_DETECTOR_DEVICE"):
+        data["detector_device"] = os.getenv("SM_DETECTOR_DEVICE")
+    if os.getenv("SM_YOLO_MODEL_PATH"):
+        data["yolo_model_path"] = os.getenv("SM_YOLO_MODEL_PATH")
+    if os.getenv("SM_SENSITIVE_LABELS"):
+        try:
+            data["sensitive_labels"] = json.loads(os.getenv("SM_SENSITIVE_LABELS", "[]"))
+        except Exception:
+            data["sensitive_labels"] = []
     return ServiceConfig(**data)
 
 
@@ -94,6 +118,8 @@ class ProcessFrameResponse(BaseModel):
     policy_version: str
     image: str
     latency_ms: float
+    detections: Optional[list[dict[str, Any]]] = None
+    blurred_count: Optional[int] = None
 
 
 class Metrics:
@@ -104,8 +130,23 @@ class Metrics:
         self.failed = 0
         self.total_latency_ms = 0.0
         self.total_inference_ms = 0.0
+        self.total_detection_ms = 0.0
+        self.total_detected_objects = 0
+        self.total_blurred_objects = 0
+        self.total_skipped_detection = 0
+        self.total_degraded = 0
 
-    def record(self, ok: bool, latency_ms: float, inference_ms: float) -> None:
+    def record(
+        self,
+        ok: bool,
+        latency_ms: float,
+        inference_ms: float,
+        detection_ms: float = 0.0,
+        detect_count: int = 0,
+        blurred_count: int = 0,
+        skipped_detection: bool = False,
+        degraded: bool = False,
+    ) -> None:
         self.total_requests += 1
         if ok:
             self.success += 1
@@ -113,6 +154,13 @@ class Metrics:
             self.failed += 1
         self.total_latency_ms += latency_ms
         self.total_inference_ms += inference_ms
+        self.total_detection_ms += detection_ms
+        self.total_detected_objects += detect_count
+        self.total_blurred_objects += blurred_count
+        if skipped_detection:
+            self.total_skipped_detection += 1
+        if degraded:
+            self.total_degraded += 1
 
     def snapshot(self) -> dict:
         elapsed = max(time.monotonic() - self.start_ts, 1e-6)
@@ -126,10 +174,37 @@ class Metrics:
             "throughput_fps": self.total_requests / elapsed,
             "avg_latency_ms": self.total_latency_ms / self.total_requests if self.total_requests else 0.0,
             "avg_inference_ms": self.total_inference_ms / self.total_requests if self.total_requests else 0.0,
+            "avg_detection_ms": self.total_detection_ms / self.total_requests if self.total_requests else 0.0,
+            "detected_objects_total": self.total_detected_objects,
+            "blurred_objects_total": self.total_blurred_objects,
+            "skipped_detection_total": self.total_skipped_detection,
+            "degraded_total": self.total_degraded,
         }
 
 
+def _build_pipeline() -> SensitiveObjectPipeline:
+    protector = RegionProtector(blur_method=CONFIG.blur_method, blur_intensity=CONFIG.blur_intensity)
+    if CONFIG.detector_provider == "yolo":
+        detector = YOLODetector(model_path=CONFIG.yolo_model_path, device=CONFIG.detector_device)
+        if not detector.available:
+            log_event("detector_unavailable", provider="yolo", reason=detector.unavailable_reason)
+            detector = UnavailableDetector(detector.unavailable_reason)
+    else:
+        detector = MockDetector()
+    return SensitiveObjectPipeline(
+        detector=detector,
+        protector=protector,
+        sensitive_labels=CONFIG.sensitive_labels,
+        confidence_threshold=CONFIG.detection_confidence_threshold,
+        inference_image_size=CONFIG.inference_image_size,
+        detect_every_n_frames=CONFIG.detect_every_n_frames,
+        bbox_smoothing_alpha=CONFIG.bbox_smoothing_alpha,
+        detector_timeout_ms=CONFIG.detector_timeout_ms,
+    )
+
+
 METRICS = Metrics()
+PIPELINE = _build_pipeline()
 app = FastAPI(title="Secure Meeting AI Service", version="1.0.0")
 
 
@@ -194,8 +269,53 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
     if req.mode == "grayscale":
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        detection_ms = 0.0
+        detect_count = 0
+        blurred_count = 0
+        skipped_detection = False
+        degraded = False
+        detections_payload: list[dict[str, Any]] = []
     else:
-        processed = image
+        try:
+            pipeline_out = PIPELINE.process(image)
+            processed = pipeline_out["processed"]
+            detection_ms = float(pipeline_out["detection_ms"])
+            detect_count = int(pipeline_out["detect_count"])
+            blurred_count = int(pipeline_out["blurred_count"])
+            skipped_detection = bool(pipeline_out["skipped_detection"])
+            degraded = bool(pipeline_out["degraded"])
+            if degraded:
+                log_event(
+                    "process_degraded",
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    reason=pipeline_out.get("degraded_reason", "detector_failed"),
+                )
+            detections_payload = [
+                {
+                    "label": det.label,
+                    "confidence": det.confidence,
+                    "bbox": list(det.bbox),
+                    "sensitive": det.sensitive,
+                    "blurred": det.blurred,
+                    "reused": det.reused,
+                }
+                for det in pipeline_out["detections"]
+            ]
+        except Exception as exc:  # pragma: no cover - runtime degradation path
+            processed = image
+            detection_ms = 0.0
+            detect_count = 0
+            blurred_count = 0
+            skipped_detection = False
+            degraded = True
+            detections_payload = []
+            log_event(
+                "process_degraded",
+                request_id=request_id,
+                trace_id=trace_id,
+                reason=f"detector_exception:{exc}",
+            )
     inference_ms = (time.perf_counter() - infer_start) * 1000.0
 
     out = ProcessFrameResponse(
@@ -205,8 +325,19 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         policy_version=policy_version,
         image=encode_base64_image(processed, request_id, trace_id),
         latency_ms=(time.perf_counter() - start) * 1000.0,
+        detections=detections_payload,
+        blurred_count=blurred_count,
     )
-    METRICS.record(ok=True, latency_ms=out.latency_ms, inference_ms=inference_ms)
+    METRICS.record(
+        ok=True,
+        latency_ms=out.latency_ms,
+        inference_ms=inference_ms,
+        detection_ms=detection_ms,
+        detect_count=detect_count,
+        blurred_count=blurred_count,
+        skipped_detection=skipped_detection,
+        degraded=degraded,
+    )
     if CONFIG.enable_metrics_log and METRICS.total_requests % max(CONFIG.metrics_log_every_n, 1) == 0:
         log_event("metrics_snapshot", **METRICS.snapshot())
     log_event(
@@ -217,6 +348,11 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         policy_version=policy_version,
         latency_ms=out.latency_ms,
         inference_ms=inference_ms,
+        detection_ms=detection_ms,
+        detected_count=detect_count,
+        blurred_count=blurred_count,
+        skipped_detection=skipped_detection,
+        degraded=degraded,
     )
     return out
 

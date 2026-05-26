@@ -2,10 +2,23 @@
   "host": "127.0.0.1",
   "port": 8000,
   "api_prefix": "/api/v1",
-  "default_mode": "grayscale",
-  "model_version": "demo-model-v1",
+  "default_mode": "pass",
+  "model_version": "yolo-phase-c-v1-id-card-finetuned",
   "policy_version": "policy-default-v1",
   "enable_metrics_log": true,
   "metrics_log_every_n": 20,
-  "enable_debug_controls": true
+  "enable_debug_controls": true,
+  "detector_provider": "yolo",
+  "detector_device": "cpu",
+  "yolo_model_path": "training/runs/id_card/weights/best.pt",
+  "detection_confidence_threshold": 0.35,
+  "inference_image_size": 640,
+  "detector_timeout_ms": 220,
+  "detect_every_n_frames": 2,
+  "bbox_smoothing_alpha": 0.7,
+  "blur_method": "gaussian",
+  "blur_intensity": 17,
+  "sensitive_labels": [
+    "id_card"
+  ]
 }
