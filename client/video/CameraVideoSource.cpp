@@ -18,6 +18,13 @@ CameraVideoSource::CameraVideoSource(QObject *parent)
     m_session->setCamera(m_camera);
     m_session->setVideoSink(m_sink);
     connect(m_sink, &QVideoSink::videoFrameChanged, this, &CameraVideoSource::onFrameChanged);
+    connect(m_camera, &QCamera::errorOccurred, this,
+            [this](QCamera::Error error, const QString &errorString) {
+                Q_UNUSED(error);
+                if (!errorString.isEmpty()) {
+                    emit sourceWarning(QStringLiteral("摄像头启动失败：%1").arg(errorString));
+                }
+            });
 }
 
 CameraVideoSource::~CameraVideoSource() = default;

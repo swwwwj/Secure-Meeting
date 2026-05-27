@@ -18,4 +18,5 @@ public:
 
 signals:
     void frameReady(const QImage &frame);
+    void sourceWarning(const QString &message);
 };

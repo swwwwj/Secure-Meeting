@@ -1,6 +1,7 @@
 #include "controller/MainController.h"
 
 #include "services/AIProcessor.h"
+#include "services/CameraPermissionService.h"
 #include "services/MeetingService.h"
 #include "services/NetworkService.h"
 #include "services/UserService.h"
@@ -12,6 +13,7 @@
 #include "video/VideoSource.h"
 
 MainController::MainController(VideoSource *videoSource,
+                               CameraPermissionService *cameraPermissionService,
                                AIProcessor *aiProcessor,
                                MeetingService *meetingService,
                                NetworkService *networkService,
@@ -19,14 +21,20 @@ MainController::MainController(VideoSource *videoSource,
                                QObject *parent)
     : QObject(parent)
     , m_videoSource(videoSource)
+    , m_cameraPermissionService(cameraPermissionService)
     , m_aiProcessor(aiProcessor)
     , m_meetingService(meetingService)
     , m_networkService(networkService)
     , m_userService(userService)
 {
     connect(m_videoSource, &VideoSource::frameReady, this, &MainController::onRawFrameReady);
+    connect(m_videoSource, &VideoSource::sourceWarning, this, &MainController::updateMeetingStatus);
     connect(m_aiProcessor, &AIProcessor::frameProcessed, this, &MainController::onProcessedFrameReady);
     connect(m_meetingService, &MeetingService::meetingStateChanged, this, &MainController::onMeetingStateChanged);
+    if (m_cameraPermissionService) {
+        connect(m_cameraPermissionService, &CameraPermissionService::cameraAccessResolved,
+                this, &MainController::onCameraPermissionResolved);
+    }
 }
 
 void MainController::bindView(MainWindow *view)
@@ -163,7 +171,7 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_view->showMeetingPage();
 
     if (m_cameraEnabled) {
-        m_videoSource->start();
+        startCameraIfAllowed();
     }
 }
 
@@ -198,7 +206,7 @@ void MainController::onCameraToggled(bool enabled)
 {
     m_cameraEnabled = enabled;
     if (enabled) {
-        m_videoSource->start();
+        startCameraIfAllowed();
     } else {
         m_videoSource->stop();
         if (m_view) m_view->meetingWindow()->clearPrimaryFrame();
@@ -240,6 +248,10 @@ void MainController::onProtectionLevelChanged(const QString &level)
 void MainController::onRawFrameReady(const QImage &frame)
 {
     if (!m_joined || !m_cameraEnabled) return;
+    if (m_view) {
+        // Show a local preview immediately; processed output can overwrite it later.
+        m_view->meetingWindow()->setPrimaryFrame(frame);
+    }
     if (m_pendingSelfEnroll && m_arcfaceEnabled && !m_userName.isEmpty()) {
         m_aiProcessor->enrollFace(m_userName, frame);
         m_pendingSelfEnroll = false;
@@ -260,6 +272,60 @@ void MainController::onMeetingStateChanged(bool joined, const QString &message)
 {
     m_joined = joined;
     updateMeetingStatus(message);
+}
+
+void MainController::onCameraPermissionResolved(bool granted, const QString &message)
+{
+    if (!m_cameraEnabled) {
+        return;
+    }
+    if (granted) {
+        m_videoSource->start();
+        if (!message.isEmpty()) {
+            updateMeetingStatus(message);
+        }
+        return;
+    }
+
+    m_cameraEnabled = false;
+    if (m_view) {
+        m_view->meetingWindow()->clearPrimaryFrame();
+        m_view->meetingWindow()->setLocalMediaState(m_cameraEnabled, m_microphoneEnabled);
+    }
+    updateMeetingStatus(message.isEmpty() ? QStringLiteral("摄像头权限未授予，已关闭本地摄像头。")
+                                          : message);
+}
+
+void MainController::startCameraIfAllowed()
+{
+    if (!m_cameraPermissionService) {
+        m_videoSource->start();
+        return;
+    }
+
+    QString permissionMessage;
+    const CameraPermissionService::AccessState state =
+        m_cameraPermissionService->ensureCameraAccess(&permissionMessage);
+    switch (state) {
+    case CameraPermissionService::AccessState::Granted:
+        m_videoSource->start();
+        break;
+    case CameraPermissionService::AccessState::Pending:
+        if (!permissionMessage.isEmpty()) {
+            updateMeetingStatus(permissionMessage);
+        }
+        break;
+    case CameraPermissionService::AccessState::Denied:
+        m_cameraEnabled = false;
+        if (m_view) {
+            m_view->meetingWindow()->clearPrimaryFrame();
+            m_view->meetingWindow()->setLocalMediaState(m_cameraEnabled, m_microphoneEnabled);
+        }
+        updateMeetingStatus(permissionMessage.isEmpty()
+                                ? QStringLiteral("摄像头权限未授予，已关闭本地摄像头。")
+                                : permissionMessage);
+        break;
+    }
 }
 
 void MainController::updateMeetingStatus(const QString &message) const

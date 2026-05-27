@@ -6,6 +6,7 @@
 
 class VideoSource;
 class AIProcessor;
+class CameraPermissionService;
 class MeetingService;
 class NetworkService;
 class UserService;
@@ -16,6 +17,7 @@ class MainController : public QObject
     Q_OBJECT
 public:
     MainController(VideoSource *videoSource,
+                   CameraPermissionService *cameraPermissionService,
                    AIProcessor *aiProcessor,
                    MeetingService *meetingService,
                    NetworkService *networkService,
@@ -45,11 +47,14 @@ private slots:
     void onRawFrameReady(const QImage &frame);
     void onProcessedFrameReady(const QImage &frame);
     void onMeetingStateChanged(bool joined, const QString &message);
+    void onCameraPermissionResolved(bool granted, const QString &message);
 
 private:
+    void startCameraIfAllowed();
     void updateMeetingStatus(const QString &message) const;
 
     VideoSource *m_videoSource;
+    CameraPermissionService *m_cameraPermissionService;
     AIProcessor *m_aiProcessor;
     MeetingService *m_meetingService;
     NetworkService *m_networkService;

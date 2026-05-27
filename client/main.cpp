@@ -1,6 +1,7 @@
 #include "controller/MainController.h"
 #include "config/AppConfig.h"
 #include "services/HttpAIProcessor.h"
+#include "services/CameraPermissionService.h"
 #include "services/HttpMeetingService.h"
 #include "services/HttpUserService.h"
 #include "services/MockMeetingService.h"
@@ -13,19 +14,16 @@
 #include "video/MockVideoSource.h"
 
 #include <QApplication>
-#include <QDebug>
 #include <QJsonDocument>
-#include <QJsonObject>
-#include <QUrl>
 #include <memory>
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     const AppConfig cfg = AppConfig::load();
-
     CameraVideoSource cameraSource;
     MockVideoSource mockSource;
+    CameraPermissionService cameraPermissionService;
     VideoSource *videoSource = cameraSource.isAvailable()
         ? static_cast<VideoSource *>(&cameraSource)
         : static_cast<VideoSource *>(&mockSource);
@@ -96,6 +94,7 @@ int main(int argc, char *argv[])
     qInfo().noquote() << QJsonDocument(startup).toJson(QJsonDocument::Compact);
 
     MainController controller(videoSource,
+                              &cameraPermissionService,
                               &aiProcessor,
                               meetingService.get(),
                               &networkService,
