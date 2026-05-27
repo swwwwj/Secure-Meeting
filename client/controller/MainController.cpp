@@ -49,6 +49,7 @@ void MainController::bindView(MainWindow *view)
     connect(meeting, &MeetingWindow::microphoneToggled, this, &MainController::onMicrophoneToggled);
     connect(meeting, &MeetingWindow::aiToggled, this, &MainController::onAIToggled);
     connect(meeting, &MeetingWindow::protectionLevelChanged, this, &MainController::onProtectionLevelChanged);
+    connect(meeting, &MeetingWindow::enrollFaceRequested, this, &MainController::onEnrollFaceRequested);
 
     meeting->setAIEnabled(m_aiProcessor->isEnabled());
 }
@@ -118,7 +119,8 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
                                             const QString &displayName,
                                             bool cameraOn,
                                             bool microphoneOn,
-                                            const QStringList &whitelist)
+                                            const QStringList &whitelist,
+                                            bool arcfaceEnabled)
 {
     if (!m_view) return;
     m_meetingId = meetingId;
@@ -126,6 +128,8 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_cameraEnabled = cameraOn;
     m_microphoneEnabled = microphoneOn;
     m_whitelist = whitelist;
+    m_arcfaceEnabled = arcfaceEnabled;
+    m_pendingSelfEnroll = arcfaceEnabled;
 
     if (!m_meetingService->joinMeeting(m_meetingId, m_userName)) {
         const QString err = m_meetingService->lastError();
@@ -140,10 +144,22 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_view->meetingWindow()->setParticipants(participants);
     m_view->meetingWindow()->setMeetingInfo(m_meetingId, m_userName);
     m_view->meetingWindow()->setLocalMediaState(m_cameraEnabled, m_microphoneEnabled);
+
+    QStringList enrollUsers = m_whitelist;
+    if (!enrollUsers.contains(m_userName)) {
+        enrollUsers.prepend(m_userName);
+    }
+    m_view->meetingWindow()->setEnrollableUsers(enrollUsers);
+    m_view->meetingWindow()->setArcFaceEnabled(m_arcfaceEnabled);
+
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+
     m_view->meetingWindow()->setStatusMessage(
-        m_whitelist.isEmpty()
-            ? "已加入会议。隐私白名单为空。"
-            : QString("已加入会议。白名单用户: %1").arg(m_whitelist.join(", ")));
+        m_arcfaceEnabled
+            ? (m_whitelist.isEmpty()
+                   ? "已加入会议。请为本人录入人脸；未在白名单的外人将模糊。"
+                   : QString("已加入会议。ArcFace 已启用，白名单: %1").arg(m_whitelist.join(", ")))
+            : "已加入会议。ArcFace 未启用。");
     m_view->showMeetingPage();
 
     if (m_cameraEnabled) {
@@ -165,9 +181,12 @@ void MainController::onLeaveClicked()
         m_meetingService->leaveMeeting();
     }
     m_userService->logout();
+    m_aiProcessor->clearPrivacyContext();
     m_joined = false;
     m_meetingId.clear();
     m_whitelist.clear();
+    m_arcfaceEnabled = false;
+    m_pendingSelfEnroll = false;
     if (m_view) {
         m_view->meetingWindow()->clearPrimaryFrame();
         m_view->loginWindow()->setErrorMessage(QString());
@@ -198,7 +217,19 @@ void MainController::onMicrophoneToggled(bool enabled)
 void MainController::onAIToggled(bool enabled)
 {
     m_aiProcessor->setEnabled(enabled);
-    updateMeetingStatus(enabled ? "AI 处理已开启。" : "AI 处理已关闭。");
+    updateMeetingStatus(enabled ? "AI 处理已开启（含物体检测与 ArcFace）。" : "AI 处理已关闭。");
+}
+
+void MainController::onEnrollFaceRequested(const QString &userId)
+{
+    if (!m_view || userId.trimmed().isEmpty()) return;
+    const QImage frame = m_videoSource->getFrame();
+    if (frame.isNull()) {
+        updateMeetingStatus("无法录入：当前没有可用画面，请开启摄像头。");
+        return;
+    }
+    m_aiProcessor->enrollFace(userId.trimmed(), frame);
+    updateMeetingStatus(QString("已向 AI 服务录入用户 %1 的人脸模板。").arg(userId.trimmed()));
 }
 
 void MainController::onProtectionLevelChanged(const QString &level)
@@ -209,6 +240,11 @@ void MainController::onProtectionLevelChanged(const QString &level)
 void MainController::onRawFrameReady(const QImage &frame)
 {
     if (!m_joined || !m_cameraEnabled) return;
+    if (m_pendingSelfEnroll && m_arcfaceEnabled && !m_userName.isEmpty()) {
+        m_aiProcessor->enrollFace(m_userName, frame);
+        m_pendingSelfEnroll = false;
+        updateMeetingStatus(QString("已自动录入 %1 的人脸；可用「录入当前画面人脸」补充白名单。").arg(m_userName));
+    }
     m_networkService->sendFrame("frame");
     m_aiProcessor->processFrame(frame);
 }

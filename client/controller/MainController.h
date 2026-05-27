@@ -33,13 +33,15 @@ private slots:
                                 const QString &displayName,
                                 bool cameraOn,
                                 bool microphoneOn,
-                                const QStringList &whitelist);
+                                const QStringList &whitelist,
+                                bool arcfaceEnabled);
     void onBackToLoginRequested();
     void onLeaveClicked();
     void onCameraToggled(bool enabled);
     void onMicrophoneToggled(bool enabled);
     void onAIToggled(bool enabled);
     void onProtectionLevelChanged(const QString &level);
+    void onEnrollFaceRequested(const QString &userId);
     void onRawFrameReady(const QImage &frame);
     void onProcessedFrameReady(const QImage &frame);
     void onMeetingStateChanged(bool joined, const QString &message);
@@ -60,4 +62,6 @@ private:
     QString m_userName;
     QString m_meetingId;
     QStringList m_whitelist;
+    bool m_arcfaceEnabled = false;
+    bool m_pendingSelfEnroll = false;
 };

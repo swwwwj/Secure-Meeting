@@ -11,6 +11,7 @@ class QToolButton;
 class QPushButton;
 class VideoWidget;
 class QButtonGroup;
+class QComboBox;
 
 class MeetingWindow : public QWidget
 {
@@ -25,6 +26,8 @@ public:
     void setLocalMediaState(bool cameraOn, bool microphoneOn);
     void clearPrimaryFrame();
     void setAIEnabled(bool enabled);
+    void setArcFaceEnabled(bool enabled);
+    void setEnrollableUsers(const QStringList &users);
 
 signals:
     void leaveClicked();
@@ -32,6 +35,7 @@ signals:
     void microphoneToggled(bool enabled);
     void aiToggled(bool enabled);
     void protectionLevelChanged(const QString &level);
+    void enrollFaceRequested(const QString &userId);
 
 private:
     void rebuildGrid(const QStringList &participants);
@@ -48,4 +52,8 @@ private:
     QToolButton *m_aiButton;
     QPushButton *m_leaveButton;
     QButtonGroup *m_protectionGroup;
+    QWidget *m_arcfacePanel;
+    QLabel *m_arcfaceStatusLabel;
+    QComboBox *m_enrollUserCombo;
+    QPushButton *m_enrollFaceButton;
 };

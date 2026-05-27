@@ -13,6 +13,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from face_pipeline import (
+    FaceGallery,
+    FacePrivacyPipeline,
+    InsightFaceRecognizer,
+    MockFaceRecognizer,
+)
 from pipeline import MockDetector, RegionProtector, SensitiveObjectPipeline, UnavailableDetector, YOLODetector
 
 
@@ -38,6 +44,11 @@ class ServiceConfig(BaseModel):
     blur_method: Literal["gaussian", "mosaic"] = "gaussian"
     blur_intensity: int = 17
     sensitive_labels: list[str] = Field(default_factory=list)
+    face_provider: Literal["mock", "insightface"] = "mock"
+    arcface_model_dir: str = "models/arcface"
+    face_match_threshold: float = 0.45
+    face_detect_every_n_frames: int = 2
+    face_model_version: str = "arcface-phase-d-v1"
 
 
 def _load_config() -> ServiceConfig:
@@ -65,6 +76,12 @@ def _load_config() -> ServiceConfig:
             data["sensitive_labels"] = json.loads(os.getenv("SM_SENSITIVE_LABELS", "[]"))
         except Exception:
             data["sensitive_labels"] = []
+    if os.getenv("SM_FACE_PROVIDER"):
+        data["face_provider"] = os.getenv("SM_FACE_PROVIDER")
+    if os.getenv("SM_ARCFACE_MODEL_DIR"):
+        data["arcface_model_dir"] = os.getenv("SM_ARCFACE_MODEL_DIR")
+    if os.getenv("SM_FACE_MATCH_THRESHOLD"):
+        data["face_match_threshold"] = float(os.getenv("SM_FACE_MATCH_THRESHOLD", "0.45"))
     return ServiceConfig(**data)
 
 
@@ -101,7 +118,25 @@ class ProcessFrameRequest(BaseModel):
     trace_id: Optional[str] = None
     model_version: Optional[str] = None
     policy_version: Optional[str] = None
+    room_id: Optional[str] = None
+    whitelist_user_ids: list[str] = Field(default_factory=list)
+    enable_face_privacy: bool = False
+    enable_object_detection: Optional[bool] = None
     debug: Optional[DebugOptions] = None
+
+
+class FaceEnrollRequest(BaseModel):
+    room_id: str
+    user_id: str
+    image: str
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
+
+
+class FaceClearRequest(BaseModel):
+    room_id: str
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
 
 
 class ErrorBody(BaseModel):
@@ -120,6 +155,9 @@ class ProcessFrameResponse(BaseModel):
     latency_ms: float
     detections: Optional[list[dict[str, Any]]] = None
     blurred_count: Optional[int] = None
+    faces: Optional[list[dict[str, Any]]] = None
+    faces_detected: Optional[int] = None
+    faces_blurred: Optional[int] = None
 
 
 class Metrics:
@@ -135,6 +173,8 @@ class Metrics:
         self.total_blurred_objects = 0
         self.total_skipped_detection = 0
         self.total_degraded = 0
+        self.total_faces_detected = 0
+        self.total_faces_blurred = 0
 
     def record(
         self,
@@ -146,6 +186,8 @@ class Metrics:
         blurred_count: int = 0,
         skipped_detection: bool = False,
         degraded: bool = False,
+        faces_detected: int = 0,
+        faces_blurred: int = 0,
     ) -> None:
         self.total_requests += 1
         if ok:
@@ -161,6 +203,8 @@ class Metrics:
             self.total_skipped_detection += 1
         if degraded:
             self.total_degraded += 1
+        self.total_faces_detected += faces_detected
+        self.total_faces_blurred += faces_blurred
 
     def snapshot(self) -> dict:
         elapsed = max(time.monotonic() - self.start_ts, 1e-6)
@@ -179,10 +223,12 @@ class Metrics:
             "blurred_objects_total": self.total_blurred_objects,
             "skipped_detection_total": self.total_skipped_detection,
             "degraded_total": self.total_degraded,
+            "faces_detected_total": self.total_faces_detected,
+            "faces_blurred_total": self.total_faces_blurred,
         }
 
 
-def _build_pipeline() -> SensitiveObjectPipeline:
+def _build_object_pipeline() -> SensitiveObjectPipeline:
     protector = RegionProtector(blur_method=CONFIG.blur_method, blur_intensity=CONFIG.blur_intensity)
     if CONFIG.detector_provider == "yolo":
         detector = YOLODetector(model_path=CONFIG.yolo_model_path, device=CONFIG.detector_device)
@@ -203,8 +249,30 @@ def _build_pipeline() -> SensitiveObjectPipeline:
     )
 
 
+def _build_face_pipeline(gallery: FaceGallery) -> FacePrivacyPipeline:
+    protector = RegionProtector(blur_method=CONFIG.blur_method, blur_intensity=CONFIG.blur_intensity)
+    base_dir = Path(__file__).resolve().parent
+    model_dir = str((base_dir / CONFIG.arcface_model_dir).resolve())
+    if CONFIG.face_provider == "insightface":
+        recognizer = InsightFaceRecognizer(model_root=model_dir, device=CONFIG.detector_device)
+        if not recognizer.available:
+            log_event("face_recognizer_unavailable", provider="insightface", reason=recognizer.unavailable_reason)
+            recognizer = MockFaceRecognizer()
+    else:
+        recognizer = MockFaceRecognizer()
+    return FacePrivacyPipeline(
+        recognizer=recognizer,
+        protector=protector,
+        gallery=gallery,
+        match_threshold=CONFIG.face_match_threshold,
+        detect_every_n_frames=CONFIG.face_detect_every_n_frames,
+    )
+
+
 METRICS = Metrics()
-PIPELINE = _build_pipeline()
+FACE_GALLERY = FaceGallery()
+OBJECT_PIPELINE = _build_object_pipeline()
+FACE_PIPELINE = _build_face_pipeline(FACE_GALLERY)
 app = FastAPI(title="Secure Meeting AI Service", version="1.0.0")
 
 
@@ -266,57 +334,104 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
 
     image = decode_base64_image(req.image, request_id, trace_id)
     infer_start = time.perf_counter()
+    detections_payload: list[dict[str, Any]] = []
+    faces_payload: list[dict[str, Any]] = []
+    detection_ms = 0.0
+    face_ms = 0.0
+    detect_count = 0
+    blurred_count = 0
+    faces_detected = 0
+    faces_blurred = 0
+    skipped_detection = False
+    degraded = False
+
     if req.mode == "grayscale":
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        detection_ms = 0.0
-        detect_count = 0
-        blurred_count = 0
-        skipped_detection = False
-        degraded = False
-        detections_payload: list[dict[str, Any]] = []
     else:
-        try:
-            pipeline_out = PIPELINE.process(image)
-            processed = pipeline_out["processed"]
-            detection_ms = float(pipeline_out["detection_ms"])
-            detect_count = int(pipeline_out["detect_count"])
-            blurred_count = int(pipeline_out["blurred_count"])
-            skipped_detection = bool(pipeline_out["skipped_detection"])
-            degraded = bool(pipeline_out["degraded"])
-            if degraded:
+        processed = image
+        run_object = req.enable_object_detection
+        if run_object is None:
+            run_object = bool(CONFIG.sensitive_labels)
+        room_id = (req.room_id or "default").strip() or "default"
+
+        if run_object:
+            try:
+                pipeline_out = OBJECT_PIPELINE.process(image)
+                processed = pipeline_out["processed"]
+                detection_ms = float(pipeline_out["detection_ms"])
+                detect_count = int(pipeline_out["detect_count"])
+                blurred_count = int(pipeline_out["blurred_count"])
+                skipped_detection = bool(pipeline_out["skipped_detection"])
+                if pipeline_out.get("degraded"):
+                    degraded = True
+                    log_event(
+                        "process_degraded",
+                        request_id=request_id,
+                        trace_id=trace_id,
+                        reason=pipeline_out.get("degraded_reason", "object_detector_failed"),
+                    )
+                detections_payload = [
+                    {
+                        "label": det.label,
+                        "confidence": det.confidence,
+                        "bbox": list(det.bbox),
+                        "sensitive": det.sensitive,
+                        "blurred": det.blurred,
+                        "reused": det.reused,
+                    }
+                    for det in pipeline_out["detections"]
+                ]
+            except Exception as exc:  # pragma: no cover
+                degraded = True
                 log_event(
                     "process_degraded",
                     request_id=request_id,
                     trace_id=trace_id,
-                    reason=pipeline_out.get("degraded_reason", "detector_failed"),
+                    reason=f"object_detector_exception:{exc}",
                 )
-            detections_payload = [
-                {
-                    "label": det.label,
-                    "confidence": det.confidence,
-                    "bbox": list(det.bbox),
-                    "sensitive": det.sensitive,
-                    "blurred": det.blurred,
-                    "reused": det.reused,
-                }
-                for det in pipeline_out["detections"]
-            ]
-        except Exception as exc:  # pragma: no cover - runtime degradation path
-            processed = image
-            detection_ms = 0.0
-            detect_count = 0
-            blurred_count = 0
-            skipped_detection = False
-            degraded = True
-            detections_payload = []
-            log_event(
-                "process_degraded",
-                request_id=request_id,
-                trace_id=trace_id,
-                reason=f"detector_exception:{exc}",
-            )
+
+        if req.enable_face_privacy:
+            try:
+                face_out = FACE_PIPELINE.process(
+                    processed,
+                    room_id=room_id,
+                    whitelist_user_ids=req.whitelist_user_ids,
+                    enabled=True,
+                )
+                processed = face_out["processed"]
+                face_ms = float(face_out["face_ms"])
+                faces_detected = int(face_out["faces_detected"])
+                faces_blurred = int(face_out["faces_blurred"])
+                if face_out.get("degraded"):
+                    degraded = True
+                    log_event(
+                        "process_degraded",
+                        request_id=request_id,
+                        trace_id=trace_id,
+                        reason=face_out.get("degraded_reason", "face_pipeline_failed"),
+                    )
+                faces_payload = [
+                    {
+                        "bbox": list(f.bbox),
+                        "confidence": f.confidence,
+                        "matched_user": f.matched_user,
+                        "similarity": f.similarity,
+                        "blurred": f.blurred,
+                    }
+                    for f in face_out["faces"]
+                ]
+            except Exception as exc:  # pragma: no cover
+                degraded = True
+                log_event(
+                    "process_degraded",
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    reason=f"face_pipeline_exception:{exc}",
+                )
+
     inference_ms = (time.perf_counter() - infer_start) * 1000.0
+    total_blurred = blurred_count + faces_blurred
 
     out = ProcessFrameResponse(
         request_id=request_id,
@@ -326,7 +441,10 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         image=encode_base64_image(processed, request_id, trace_id),
         latency_ms=(time.perf_counter() - start) * 1000.0,
         detections=detections_payload,
-        blurred_count=blurred_count,
+        blurred_count=total_blurred,
+        faces=faces_payload,
+        faces_detected=faces_detected,
+        faces_blurred=faces_blurred,
     )
     METRICS.record(
         ok=True,
@@ -334,9 +452,11 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         inference_ms=inference_ms,
         detection_ms=detection_ms,
         detect_count=detect_count,
-        blurred_count=blurred_count,
+        blurred_count=total_blurred,
         skipped_detection=skipped_detection,
         degraded=degraded,
+        faces_detected=faces_detected,
+        faces_blurred=faces_blurred,
     )
     if CONFIG.enable_metrics_log and METRICS.total_requests % max(CONFIG.metrics_log_every_n, 1) == 0:
         log_event("metrics_snapshot", **METRICS.snapshot())
@@ -349,8 +469,11 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         latency_ms=out.latency_ms,
         inference_ms=inference_ms,
         detection_ms=detection_ms,
+        face_ms=face_ms,
         detected_count=detect_count,
-        blurred_count=blurred_count,
+        blurred_count=total_blurred,
+        faces_detected=faces_detected,
+        faces_blurred=faces_blurred,
         skipped_detection=skipped_detection,
         degraded=degraded,
     )
@@ -374,6 +497,52 @@ def process_frame_v1(req: ProcessFrameRequest) -> ProcessFrameResponse:
     except ApiError:
         METRICS.record(ok=False, latency_ms=0.0, inference_ms=0.0)
         raise
+
+
+@app.post(f"{CONFIG.api_prefix}/face/enroll")
+def face_enroll(req: FaceEnrollRequest) -> dict:
+    request_id = req.request_id or str(uuid.uuid4())
+    trace_id = req.trace_id or str(uuid.uuid4())
+    room_id = req.room_id.strip()
+    user_id = req.user_id.strip()
+    if not room_id or not user_id:
+        raise ApiError("INVALID_ENROLL_PAYLOAD", "room_id and user_id are required", 400, request_id, trace_id)
+
+    image = decode_base64_image(req.image, request_id, trace_id)
+    faces = FACE_PIPELINE.recognizer.detect_faces(image)
+    if not faces:
+        raise ApiError("FACE_NOT_FOUND", "No face detected for enrollment", 400, request_id, trace_id)
+    primary = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+    embedding = FACE_PIPELINE.recognizer.embed_face(image, primary.bbox)
+    count = FACE_GALLERY.enroll(room_id, user_id, embedding)
+    log_event(
+        "face_enrolled",
+        request_id=request_id,
+        trace_id=trace_id,
+        room_id=room_id,
+        user_id=user_id,
+        template_count=count,
+    )
+    return {
+        "status": "enrolled",
+        "room_id": room_id,
+        "user_id": user_id,
+        "template_count": count,
+        "request_id": request_id,
+        "trace_id": trace_id,
+    }
+
+
+@app.post(f"{CONFIG.api_prefix}/face/clear")
+def face_clear(req: FaceClearRequest) -> dict:
+    request_id = req.request_id or str(uuid.uuid4())
+    trace_id = req.trace_id or str(uuid.uuid4())
+    room_id = req.room_id.strip()
+    if not room_id:
+        raise ApiError("INVALID_CLEAR_PAYLOAD", "room_id is required", 400, request_id, trace_id)
+    FACE_GALLERY.clear_room(room_id)
+    log_event("face_gallery_cleared", request_id=request_id, trace_id=trace_id, room_id=room_id)
+    return {"status": "cleared", "room_id": room_id, "request_id": request_id, "trace_id": trace_id}
 
 
 @app.post("/process_frame")

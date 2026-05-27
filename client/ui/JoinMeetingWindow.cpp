@@ -14,6 +14,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     , m_meetingIdEdit(new QLineEdit(this))
     , m_cameraCheck(new QCheckBox("进入会议后开启摄像头", this))
     , m_microphoneCheck(new QCheckBox("进入会议后开启麦克风", this))
+    , m_arcfaceCheck(new QCheckBox("启用 ArcFace 无关人员模糊", this))
     , m_whitelistInput(new QLineEdit(this))
     , m_whitelistList(new QListWidget(this))
     , m_noticeLabel(new QLabel(this))
@@ -54,8 +55,9 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
 
     m_cameraCheck->setChecked(true);
     m_microphoneCheck->setChecked(true);
+    m_arcfaceCheck->setChecked(true);
 
-    auto *wlTitle = new QLabel("隐私保护白名单（这些用户不做 ArcFace 模糊）", card);
+    auto *wlTitle = new QLabel("隐私保护白名单（已录入人脸的用户不模糊）", card);
     wlTitle->setObjectName("sectionTitle");
 
     auto *wlRow = new QHBoxLayout();
@@ -72,12 +74,13 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     removeButton->setObjectName("textButton");
 
     m_noticeLabel->setObjectName("mutedText");
-    m_noticeLabel->setText("可直接进入会议，白名单仅演示交互流程。");
+    m_noticeLabel->setText("入会后在会议页点击「录入人脸」；白名单用户需先录入当前画面人脸。");
 
     cardLayout->addWidget(m_displayNameEdit);
     cardLayout->addWidget(m_meetingIdEdit);
     cardLayout->addWidget(m_cameraCheck);
     cardLayout->addWidget(m_microphoneCheck);
+    cardLayout->addWidget(m_arcfaceCheck);
     cardLayout->addSpacing(8);
     cardLayout->addWidget(wlTitle);
     cardLayout->addLayout(wlRow);
@@ -119,7 +122,8 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
                                   m_displayNameEdit->text().trimmed(),
                                   m_cameraCheck->isChecked(),
                                   m_microphoneCheck->isChecked(),
-                                  whitelistUsers());
+                                  whitelistUsers(),
+                                  m_arcfaceCheck->isChecked());
     });
 }
 

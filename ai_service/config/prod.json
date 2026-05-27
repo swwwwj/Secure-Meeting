@@ -24,5 +24,10 @@
     "tv",
     "book",
     "person"
-  ]
+  ],
+  "face_provider": "insightface",
+  "arcface_model_dir": "models/arcface",
+  "face_match_threshold": 0.45,
+  "face_detect_every_n_frames": 2,
+  "face_model_version": "arcface-phase-d-v1"
 }

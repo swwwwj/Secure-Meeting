@@ -23,7 +23,8 @@ signals:
                               const QString &displayName,
                               bool cameraOn,
                               bool microphoneOn,
-                              const QStringList &whitelist);
+                              const QStringList &whitelist,
+                              bool arcfaceEnabled);
     void backToLoginRequested();
 
 private:
@@ -33,6 +34,7 @@ private:
     QLineEdit *m_meetingIdEdit;
     QCheckBox *m_cameraCheck;
     QCheckBox *m_microphoneCheck;
+    QCheckBox *m_arcfaceCheck;
     QLineEdit *m_whitelistInput;
     QListWidget *m_whitelistList;
     QLabel *m_noticeLabel;

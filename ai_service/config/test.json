@@ -20,5 +20,10 @@
   "blur_intensity": 9,
   "sensitive_labels": [
     "id_card"
-  ]
+  ],
+  "face_provider": "mock",
+  "arcface_model_dir": "models/arcface",
+  "face_match_threshold": 0.45,
+  "face_detect_every_n_frames": 1,
+  "face_model_version": "arcface-phase-d-v1-mock"
 }

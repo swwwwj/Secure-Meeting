@@ -3,6 +3,7 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QDebug>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -15,13 +16,94 @@ HttpAIProcessor::HttpAIProcessor(const QUrl &endpoint,
                                  const QString &policyVersion,
                                  QObject *parent)
     : AIProcessor(parent)
-    , m_endpoint(endpoint)
+    , m_processEndpoint(endpoint)
     , m_timeoutMs(timeoutMs)
     , m_maxInFlightRequests(maxInFlightRequests)
     , m_modelVersion(modelVersion)
     , m_policyVersion(policyVersion)
 {
+    m_apiBase = endpoint;
+    const QString path = endpoint.path();
+    const int cut = path.lastIndexOf(QStringLiteral("/process_frame"));
+    if (cut > 0) {
+        m_apiBase.setPath(path.left(cut));
+    }
     m_startedMs = QDateTime::currentMSecsSinceEpoch();
+}
+
+QUrl HttpAIProcessor::apiUrl(const QString &path) const
+{
+    QUrl url = m_apiBase;
+    const QString basePath = url.path();
+    const QString joined = basePath.endsWith(QLatin1Char('/'))
+        ? basePath + path
+        : basePath + QLatin1Char('/') + path;
+    url.setPath(joined);
+    return url;
+}
+
+void HttpAIProcessor::setPrivacyContext(const QString &roomId,
+                                        const QStringList &whitelistUserIds,
+                                        bool facePrivacyEnabled,
+                                        bool objectDetectionEnabled)
+{
+    m_roomId = roomId.trimmed();
+    m_whitelistUserIds = whitelistUserIds;
+    m_facePrivacyEnabled = facePrivacyEnabled;
+    m_objectDetectionEnabled = objectDetectionEnabled;
+    logEvent("privacy_context_set",
+             {{"room_id", m_roomId},
+              {"whitelist_count", m_whitelistUserIds.size()},
+              {"face_privacy", facePrivacyEnabled},
+              {"object_detection", objectDetectionEnabled}});
+}
+
+void HttpAIProcessor::clearPrivacyContext()
+{
+    if (m_roomId.isEmpty()) {
+        m_roomId.clear();
+        m_whitelistUserIds.clear();
+        return;
+    }
+    const QString roomId = m_roomId;
+    QJsonObject body{{"room_id", roomId}};
+    QNetworkRequest request(apiUrl(QStringLiteral("face/clear")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(m_timeoutMs);
+    QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    m_roomId.clear();
+    m_whitelistUserIds.clear();
+    logEvent("privacy_context_cleared", {{"room_id", roomId}});
+}
+
+void HttpAIProcessor::postEnroll(const QString &userId, const QImage &frame)
+{
+    if (m_roomId.isEmpty() || userId.trimmed().isEmpty() || frame.isNull()) {
+        return;
+    }
+    QJsonObject body;
+    body.insert("room_id", m_roomId);
+    body.insert("user_id", userId.trimmed());
+    body.insert("image", QString::fromLatin1(imageToBase64(frame)));
+    body.insert("request_id", newId());
+    body.insert("trace_id", newId());
+
+    QNetworkRequest request(apiUrl(QStringLiteral("face/enroll")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setTransferTimeout(m_timeoutMs);
+    QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId]() {
+        const bool ok = (reply->error() == QNetworkReply::NoError);
+        logEvent(ok ? "face_enroll_ok" : "face_enroll_fail",
+                 {{"user_id", userId}, {"error", reply->errorString()}});
+        reply->deleteLater();
+    });
+}
+
+void HttpAIProcessor::enrollFace(const QString &userId, const QImage &frame)
+{
+    postEnroll(userId, frame);
 }
 
 void HttpAIProcessor::setEnabled(bool enabled)
@@ -44,7 +126,7 @@ void HttpAIProcessor::processFrame(const QImage &frame)
         return;
     }
 
-    if (!m_endpoint.isValid()) {
+    if (!m_processEndpoint.isValid()) {
         emit frameProcessed(frame);
         return;
     }
@@ -66,8 +148,20 @@ void HttpAIProcessor::processFrame(const QImage &frame)
     body.insert("trace_id", traceId);
     body.insert("model_version", m_modelVersion);
     body.insert("policy_version", m_policyVersion);
+    if (!m_roomId.isEmpty()) {
+        body.insert("room_id", m_roomId);
+    }
+    if (!m_whitelistUserIds.isEmpty()) {
+        QJsonArray users;
+        for (const QString &name : m_whitelistUserIds) {
+            users.append(name);
+        }
+        body.insert("whitelist_user_ids", users);
+    }
+    body.insert("enable_face_privacy", m_facePrivacyEnabled);
+    body.insert("enable_object_detection", m_objectDetectionEnabled);
 
-    QNetworkRequest request(m_endpoint);
+    QNetworkRequest request(m_processEndpoint);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setTransferTimeout(m_timeoutMs);
 

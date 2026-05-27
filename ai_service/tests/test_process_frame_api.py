@@ -36,6 +36,7 @@ def _client() -> TestClient:
     os.environ.pop("SM_DETECTOR_DEVICE", None)
     os.environ.pop("SM_YOLO_MODEL_PATH", None)
     os.environ.pop("SM_SENSITIVE_LABELS", None)
+    os.environ.pop("SM_FACE_PROVIDER", None)
     os.environ["SM_ENV"] = "test"
     mod = importlib.import_module("app")
     importlib.reload(mod)
@@ -154,3 +155,58 @@ def test_detector_failure_degrades_to_passthrough():
     assert body["blurred_count"] == 0
     out = _decode_image(body["image"])
     assert np.array_equal(out, _decode_image(source))
+
+
+def test_face_enroll_and_privacy_blur():
+    client = _client()
+    image_b64 = _make_image_b64()
+    room_id = "room-test-arcface"
+    user_id = "alice"
+
+    clear_resp = client.post("/api/v1/face/clear", json={"room_id": room_id})
+    assert clear_resp.status_code == 200
+
+    enroll_resp = client.post(
+        "/api/v1/face/enroll",
+        json={"room_id": room_id, "user_id": user_id, "image": image_b64},
+    )
+    assert enroll_resp.status_code == 200
+    assert enroll_resp.json()["template_count"] >= 1
+
+    process_resp = client.post(
+        "/api/v1/process_frame",
+        json={
+            "image": image_b64,
+            "mode": "pass",
+            "room_id": room_id,
+            "whitelist_user_ids": [user_id],
+            "enable_face_privacy": True,
+            "enable_object_detection": False,
+        },
+    )
+    assert process_resp.status_code == 200
+    body = process_resp.json()
+    assert body["faces_detected"] >= 1
+    assert body["faces_blurred"] >= 0
+
+
+def test_face_privacy_without_enrollment_blurs():
+    client = _client()
+    image_b64 = _make_image_b64()
+    room_id = "room-test-no-enroll"
+    client.post("/api/v1/face/clear", json={"room_id": room_id})
+
+    resp = client.post(
+        "/api/v1/process_frame",
+        json={
+            "image": image_b64,
+            "mode": "pass",
+            "room_id": room_id,
+            "whitelist_user_ids": ["alice"],
+            "enable_face_privacy": True,
+            "enable_object_detection": False,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["faces_blurred"] >= 1

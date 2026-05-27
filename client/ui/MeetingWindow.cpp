@@ -3,6 +3,7 @@
 #include "ui/VideoWidget.h"
 
 #include <QButtonGroup>
+#include <QComboBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -59,6 +60,23 @@ MeetingWindow::MeetingWindow(QWidget *parent)
     ph->addStretch();
     root->addWidget(protectionPanel);
 
+    m_arcfacePanel = new QWidget(this);
+    m_arcfacePanel->setObjectName("panelCard");
+    auto *ah = new QHBoxLayout(m_arcfacePanel);
+    ah->setContentsMargins(14, 10, 14, 10);
+    m_arcfaceStatusLabel = new QLabel("ArcFace: 关闭", m_arcfacePanel);
+    m_arcfaceStatusLabel->setObjectName("mutedText");
+    m_enrollUserCombo = new QComboBox(m_arcfacePanel);
+    m_enrollUserCombo->setObjectName("inputField");
+    m_enrollUserCombo->setMinimumWidth(160);
+    m_enrollFaceButton = new QPushButton("录入当前画面人脸", m_arcfacePanel);
+    m_enrollFaceButton->setObjectName("secondaryButton");
+    m_enrollFaceButton->setEnabled(false);
+    ah->addWidget(m_arcfaceStatusLabel);
+    ah->addWidget(m_enrollUserCombo, 1);
+    ah->addWidget(m_enrollFaceButton);
+    root->addWidget(m_arcfacePanel);
+
     auto *floating = new QWidget(this);
     floating->setObjectName("floatingBar");
     auto *fh = new QHBoxLayout(floating);
@@ -93,6 +111,12 @@ MeetingWindow::MeetingWindow(QWidget *parent)
     connect(m_aiButton, &QToolButton::toggled, this, &MeetingWindow::aiToggled);
     connect(m_protectionGroup, &QButtonGroup::idClicked, this, [this, levels](int id) {
         emit protectionLevelChanged(levels.value(id, "低"));
+    });
+    connect(m_enrollFaceButton, &QPushButton::clicked, this, [this]() {
+        const QString userId = m_enrollUserCombo->currentText().trimmed();
+        if (!userId.isEmpty()) {
+            emit enrollFaceRequested(userId);
+        }
     });
 }
 
@@ -137,6 +161,25 @@ void MeetingWindow::clearPrimaryFrame()
 void MeetingWindow::setAIEnabled(bool enabled)
 {
     m_aiButton->setChecked(enabled);
+}
+
+void MeetingWindow::setArcFaceEnabled(bool enabled)
+{
+    m_arcfacePanel->setVisible(enabled);
+    m_arcfaceStatusLabel->setText(enabled ? QStringLiteral("ArcFace: 已启用")
+                                         : QStringLiteral("ArcFace: 关闭"));
+    m_enrollFaceButton->setEnabled(enabled && m_enrollUserCombo->count() > 0);
+}
+
+void MeetingWindow::setEnrollableUsers(const QStringList &users)
+{
+    m_enrollUserCombo->clear();
+    for (const QString &user : users) {
+        if (!user.trimmed().isEmpty()) {
+            m_enrollUserCombo->addItem(user.trimmed());
+        }
+    }
+    m_enrollFaceButton->setEnabled(m_enrollUserCombo->count() > 0 && m_arcfacePanel->isVisible());
 }
 
 void MeetingWindow::rebuildGrid(const QStringList &participants)
