@@ -8,6 +8,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.venv*/
 venv/
 env/
 
@@ -36,6 +37,7 @@ Makefile
 compile_commands.json
 build/
 build_*/
+build-*/
 out/
 *.user
 *.autosave
@@ -71,6 +73,11 @@ desktop.ini
 
 # Local assistant/tooling state
 .claude/
+.dbg/
+debug-face-profile-upload.md
+
+# Local AI model cache
+ai_service/models/arcface/models/
 
 # YOLO training data and runs (keep code, ignore local datasets/weights)
 ai_service/training/datasets/
