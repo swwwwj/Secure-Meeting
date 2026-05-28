@@ -273,6 +273,8 @@ void MainController::onAIToggled(bool enabled)
     m_aiProcessor->setEnabled(enabled);
     if (enabled) {
         m_hasProcessedAiFrame = false;
+    } else if (m_view) {
+        m_view->meetingWindow()->setPrimaryPrivacyRegions({});
     }
     updateMeetingStatus(enabled ? "AI 处理已开启（含物体检测与 ArcFace）。" : "AI 处理已关闭。");
 }

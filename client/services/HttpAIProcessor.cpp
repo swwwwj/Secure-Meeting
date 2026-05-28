@@ -406,6 +406,11 @@ void HttpAIProcessor::postProcessRequest(const EncodedFrame &encoded)
         m_totalLatencyMs += latencyMs;
         m_inFlight.remove(reply);
 
+        if (!m_enabled) {
+            reply->deleteLater();
+            return;
+        }
+
         if (ok) {
             const QJsonDocument doc = QJsonDocument::fromJson(payload);
             const QJsonObject obj = doc.object();
@@ -457,13 +462,16 @@ QByteArray HttpAIProcessor::imageToBase64(const QImage &frame, int maxEdge, int 
 
 void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, const QSize &imageSize)
 {
-    m_cachedPrivacyRegions.clear();
+    QVector<QRectF> nextRegions;
     m_havePrivacyMetadata = true;
     if (imageSize.width() <= 0 || imageSize.height() <= 0) {
         return;
     }
 
-    const auto appendBox = [this, &imageSize](const QJsonArray &bbox) {
+    const auto appendBox = [&nextRegions, &imageSize](const QJsonArray &bbox,
+                                                      double padX,
+                                                      double padTop,
+                                                      double padBottom) {
         if (bbox.size() < 4) {
             return;
         }
@@ -471,11 +479,15 @@ void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, co
         const double y1 = bbox.at(1).toDouble();
         const double x2 = bbox.at(2).toDouble();
         const double y2 = bbox.at(3).toDouble();
-        QRectF normalized(QPointF(x1 / imageSize.width(), y1 / imageSize.height()),
-                          QPointF(x2 / imageSize.width(), y2 / imageSize.height()));
+        const double boxWidth = qMax(1.0, x2 - x1);
+        const double boxHeight = qMax(1.0, y2 - y1);
+        QRectF normalized(QPointF((x1 - boxWidth * padX) / imageSize.width(),
+                                  (y1 - boxHeight * padTop) / imageSize.height()),
+                          QPointF((x2 + boxWidth * padX) / imageSize.width(),
+                                  (y2 + boxHeight * padBottom) / imageSize.height()));
         normalized = normalized.normalized().intersected(QRectF(0.0, 0.0, 1.0, 1.0));
         if (normalized.width() > 0.0 && normalized.height() > 0.0) {
-            m_cachedPrivacyRegions.append(normalized);
+            nextRegions.append(normalized);
         }
     };
 
@@ -483,7 +495,7 @@ void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, co
     for (const QJsonValue &value : detections) {
         const QJsonObject det = value.toObject();
         if (det.value("blurred").toBool(false) || det.value("sensitive").toBool(false)) {
-            appendBox(det.value("bbox").toArray());
+            appendBox(det.value("bbox").toArray(), 0.08, 0.08, 0.08);
         }
     }
 
@@ -491,8 +503,27 @@ void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, co
     for (const QJsonValue &value : faces) {
         const QJsonObject face = value.toObject();
         if (face.value("blurred").toBool(false)) {
-            appendBox(face.value("bbox").toArray());
+            appendBox(face.value("bbox").toArray(), 0.38, 0.45, 0.35);
         }
+    }
+
+    if (m_cachedPrivacyRegions.size() == nextRegions.size()) {
+        QVector<QRectF> smoothed;
+        smoothed.reserve(nextRegions.size());
+        constexpr double alpha = 0.65;
+        for (int i = 0; i < nextRegions.size(); ++i) {
+            const QRectF &prev = m_cachedPrivacyRegions.at(i);
+            const QRectF &next = nextRegions.at(i);
+            smoothed.append(QRectF(
+                prev.left() * (1.0 - alpha) + next.left() * alpha,
+                prev.top() * (1.0 - alpha) + next.top() * alpha,
+                prev.width() * (1.0 - alpha) + next.width() * alpha,
+                prev.height() * (1.0 - alpha) + next.height() * alpha
+            ).intersected(QRectF(0.0, 0.0, 1.0, 1.0)));
+        }
+        m_cachedPrivacyRegions = smoothed;
+    } else {
+        m_cachedPrivacyRegions = nextRegions;
     }
 
     emit privacyRegionsUpdated(m_cachedPrivacyRegions);

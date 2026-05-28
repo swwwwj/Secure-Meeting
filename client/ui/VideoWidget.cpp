@@ -8,6 +8,8 @@
 #include <QResizeEvent>
 #include <QSizePolicy>
 
+#include <limits>
+
 VideoWidget::VideoWidget(const QString &participant, QWidget *parent)
     : QWidget(parent)
     , m_canvas(new QLabel(this))
@@ -81,16 +83,24 @@ void VideoWidget::refreshFrame()
     const QSize size = m_canvas->size();
     if (size.isEmpty()) return;
     m_canvas->setText(QString());
-    QImage preview = m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::FastTransformation);
+    const QImage scaled = m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::FastTransformation);
+    const QRect visibleSource(
+        qMax(0, (scaled.width() - size.width()) / 2),
+        qMax(0, (scaled.height() - size.height()) / 2),
+        qMin(size.width(), scaled.width()),
+        qMin(size.height(), scaled.height())
+    );
+    QImage preview = scaled.copy(visibleSource);
     if (!m_privacyRegions.isEmpty()) {
         QPainter painter(&preview);
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
         for (const QRectF &normalized : m_privacyRegions) {
-            QRect rect(qRound(normalized.left() * preview.width()),
-                       qRound(normalized.top() * preview.height()),
-                       qRound(normalized.width() * preview.width()),
-                       qRound(normalized.height() * preview.height()));
-            rect = rect.normalized().adjusted(-8, -8, 8, 8).intersected(preview.rect());
+            QRect rect(qRound(normalized.left() * scaled.width()) - visibleSource.left(),
+                       qRound(normalized.top() * scaled.height()) - visibleSource.top(),
+                       qRound(normalized.width() * scaled.width()),
+                       qRound(normalized.height() * scaled.height()));
+            const int margin = qMax(12, qMin(rect.width(), rect.height()) / 6);
+            rect = rect.normalized().adjusted(-margin, -margin, margin, margin).intersected(preview.rect());
             if (!rect.isEmpty()) {
                 const QImage roi = preview.copy(rect);
                 const QSize tinySize(qMax(1, rect.width() / 16), qMax(1, rect.height() / 16));
@@ -100,4 +110,81 @@ void VideoWidget::refreshFrame()
         }
     }
     m_canvas->setPixmap(QPixmap::fromImage(preview));
+}
+
+void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
+{
+    if (nextFrame.isNull() || m_lastFrame.size().isEmpty()) {
+        return;
+    }
+
+    constexpr int trackWidth = 192;
+    const int trackHeight = qMax(1, trackWidth * nextFrame.height() / qMax(1, nextFrame.width()));
+    const QSize trackSize(trackWidth, trackHeight);
+    const QImage prev = m_lastFrame.scaled(trackSize, Qt::IgnoreAspectRatio, Qt::FastTransformation)
+                            .convertToFormat(QImage::Format_Grayscale8);
+    const QImage curr = nextFrame.scaled(trackSize, Qt::IgnoreAspectRatio, Qt::FastTransformation)
+                            .convertToFormat(QImage::Format_Grayscale8);
+
+    QVector<QRectF> tracked;
+    tracked.reserve(m_privacyRegions.size());
+    const QRect bounds(0, 0, trackWidth, trackHeight);
+
+    for (const QRectF &normalized : m_privacyRegions) {
+        QRect templateRect(qRound(normalized.left() * trackWidth),
+                           qRound(normalized.top() * trackHeight),
+                           qRound(normalized.width() * trackWidth),
+                           qRound(normalized.height() * trackHeight));
+        templateRect = templateRect.normalized().intersected(bounds);
+        if (templateRect.width() < 8 || templateRect.height() < 8) {
+            tracked.append(normalized);
+            continue;
+        }
+
+        QRect matchRect = templateRect.adjusted(templateRect.width() / 4,
+                                                templateRect.height() / 4,
+                                                -templateRect.width() / 4,
+                                                -templateRect.height() / 4);
+        if (matchRect.width() < 8 || matchRect.height() < 8) {
+            matchRect = templateRect;
+        }
+
+        const int searchRadius = qBound(8, qMin(templateRect.width(), templateRect.height()) / 2, 24);
+        const int sampleStep = qBound(2, qMin(matchRect.width(), matchRect.height()) / 10, 5);
+        qint64 bestScore = std::numeric_limits<qint64>::max();
+        QPoint bestDelta(0, 0);
+
+        for (int dy = -searchRadius; dy <= searchRadius; dy += 2) {
+            for (int dx = -searchRadius; dx <= searchRadius; dx += 2) {
+                const QRect candidate = matchRect.translated(dx, dy);
+                if (!bounds.contains(candidate)) {
+                    continue;
+                }
+                qint64 score = 0;
+                int samples = 0;
+                for (int y = 0; y < matchRect.height(); y += sampleStep) {
+                    const uchar *prevLine = prev.constScanLine(matchRect.top() + y) + matchRect.left();
+                    const uchar *currLine = curr.constScanLine(candidate.top() + y) + candidate.left();
+                    for (int x = 0; x < matchRect.width(); x += sampleStep) {
+                        score += qAbs(int(prevLine[x]) - int(currLine[x]));
+                        ++samples;
+                    }
+                }
+                if (samples > 0) {
+                    score /= samples;
+                }
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestDelta = QPoint(dx, dy);
+                }
+            }
+        }
+
+        QRectF moved = normalized.translated(static_cast<double>(bestDelta.x()) / trackWidth,
+                                             static_cast<double>(bestDelta.y()) / trackHeight);
+        moved = moved.intersected(QRectF(0.0, 0.0, 1.0, 1.0));
+        tracked.append(moved.isEmpty() ? normalized : moved);
+    }
+
+    m_privacyRegions = tracked;
 }

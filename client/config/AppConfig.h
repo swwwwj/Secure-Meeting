@@ -10,12 +10,12 @@ struct AppConfig
     QUrl meetingServerEndpoint = QUrl("http://127.0.0.1:8100");
     bool aiEnabledByDefault = false;
     bool useMockServices = false;
-    int aiTimeoutMs = 1200;
+    int aiTimeoutMs = 2500;
     int meetingTimeoutMs = 1500;
     int maxInFlightRequests = 2;
-    int aiMinFrameIntervalMs = 1000;
-    int aiTransportMaxEdge = 224;
-    int aiTransportJpegQuality = 50;
+    int aiMinFrameIntervalMs = 250;
+    int aiTransportMaxEdge = 480;
+    int aiTransportJpegQuality = 75;
     QString modelVersion = "demo-model-v1";
     QString policyVersion = "policy-default-v1";
 

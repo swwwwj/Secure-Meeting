@@ -25,6 +25,7 @@ protected:
 
 private:
     void refreshFrame();
+    void trackPrivacyRegions(const QImage &nextFrame);
 
     QLabel *m_canvas;
     QLabel *m_nameChip;
