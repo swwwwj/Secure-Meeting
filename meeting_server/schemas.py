@@ -56,6 +56,35 @@ class PolicyChangeRequest(BaseModel):
     trace_id: str | None = None
 
 
+class FaceProfileEnrollRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=64)
+    image: str = Field(min_length=1)
+    request_id: str | None = None
+    trace_id: str | None = None
+
+
+class FaceProfileQueryRequest(BaseModel):
+    profile_keys: list[str] = Field(default_factory=list)
+    usernames: list[str] = Field(default_factory=list)
+    request_id: str | None = None
+    trace_id: str | None = None
+
+
+class FaceProfileSummary(BaseModel):
+    profile_key: str
+    username: str
+    label: str
+    updated_at: str
+
+
+class FaceProfileDetail(BaseModel):
+    profile_key: str
+    username: str
+    label: str
+    image: str
+    updated_at: str
+
+
 class ApiErrorBody(BaseModel):
     code: str
     message: str

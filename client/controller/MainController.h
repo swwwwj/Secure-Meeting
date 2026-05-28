@@ -4,6 +4,8 @@
 #include <QImage>
 #include <QStringList>
 
+#include "services/UserService.h"
+
 class VideoSource;
 class AIProcessor;
 class CameraPermissionService;
@@ -35,15 +37,18 @@ private slots:
                                 const QString &displayName,
                                 bool cameraOn,
                                 bool microphoneOn,
-                                const QStringList &whitelist,
+                                const QStringList &whitelistProfileKeys,
                                 bool arcfaceEnabled);
+    void onFaceProfileEnrollRequested(const QString &label, const QImage &image);
+    void onRefreshFaceProfilesRequested();
     void onBackToLoginRequested();
     void onLeaveClicked();
     void onCameraToggled(bool enabled);
     void onMicrophoneToggled(bool enabled);
     void onAIToggled(bool enabled);
     void onProtectionLevelChanged(const QString &level);
-    void onEnrollFaceRequested(const QString &userId);
+    void onEnrollFacesRequested(const QString &labelPrefix);
+    void onMeetingWhitelistChanged(const QStringList &selectedProfileKeys);
     void onRawFrameReady(const QImage &frame);
     void onProcessedFrameReady(const QImage &frame);
     void onMeetingStateChanged(bool joined, const QString &message);
@@ -52,6 +57,8 @@ private slots:
 private:
     void startCameraIfAllowed();
     void updateMeetingStatus(const QString &message) const;
+    void refreshFaceProfiles(const QString &statusMessage = QString());
+    static QImage imageFromBase64(const QString &imageBase64);
 
     VideoSource *m_videoSource;
     CameraPermissionService *m_cameraPermissionService;
@@ -67,6 +74,9 @@ private:
     QString m_userName;
     QString m_meetingId;
     QStringList m_whitelist;
+    QList<FaceProfileSummary> m_availableFaceProfiles;
+    QList<FaceProfileSummary> m_meetingFaceProfiles;
     bool m_arcfaceEnabled = false;
     bool m_pendingSelfEnroll = false;
+    bool m_hasProcessedAiFrame = false;
 };

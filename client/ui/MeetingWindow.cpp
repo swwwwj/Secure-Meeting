@@ -2,12 +2,16 @@
 
 #include "ui/VideoWidget.h"
 
+#include <QAbstractItemView>
 #include <QButtonGroup>
-#include <QComboBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -24,8 +28,8 @@ MeetingWindow::MeetingWindow(QWidget *parent)
     , m_protectionGroup(new QButtonGroup(this))
 {
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(20, 16, 20, 16);
-    root->setSpacing(12);
+    root->setContentsMargins(16, 12, 16, 12);
+    root->setSpacing(10);
 
     auto *header = new QWidget(this);
     header->setObjectName("topBar");
@@ -38,9 +42,9 @@ MeetingWindow::MeetingWindow(QWidget *parent)
     h->addWidget(m_statusLabel);
     root->addWidget(header);
 
-    m_grid->setSpacing(12);
+    m_grid->setSpacing(10);
     m_grid->setContentsMargins(0, 0, 0, 0);
-    root->addWidget(m_gridHost, 1);
+    m_gridHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     auto *protectionPanel = new QWidget(this);
     protectionPanel->setObjectName("panelCard");
@@ -58,24 +62,48 @@ MeetingWindow::MeetingWindow(QWidget *parent)
         ph->addWidget(btn);
     }
     ph->addStretch();
-    root->addWidget(protectionPanel);
-
     m_arcfacePanel = new QWidget(this);
     m_arcfacePanel->setObjectName("panelCard");
-    auto *ah = new QHBoxLayout(m_arcfacePanel);
+    auto *ah = new QVBoxLayout(m_arcfacePanel);
     ah->setContentsMargins(14, 10, 14, 10);
+    ah->setSpacing(10);
     m_arcfaceStatusLabel = new QLabel("ArcFace: 关闭", m_arcfacePanel);
     m_arcfaceStatusLabel->setObjectName("mutedText");
-    m_enrollUserCombo = new QComboBox(m_arcfacePanel);
-    m_enrollUserCombo->setObjectName("inputField");
-    m_enrollUserCombo->setMinimumWidth(160);
+    m_enrollFaceNameEdit = new QLineEdit(m_arcfacePanel);
+    m_enrollFaceNameEdit->setObjectName("inputField");
+    m_enrollFaceNameEdit->setPlaceholderText("当前画面人脸命名前缀，例如 前排嘉宾");
     m_enrollFaceButton = new QPushButton("录入当前画面人脸", m_arcfacePanel);
     m_enrollFaceButton->setObjectName("secondaryButton");
     m_enrollFaceButton->setEnabled(false);
+    m_roomFaceList = new QListWidget(m_arcfacePanel);
+    m_roomFaceList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_roomFaceList->setMinimumHeight(180);
+    auto *row = new QHBoxLayout();
+    row->addWidget(m_enrollFaceNameEdit, 1);
+    row->addWidget(m_enrollFaceButton);
     ah->addWidget(m_arcfaceStatusLabel);
-    ah->addWidget(m_enrollUserCombo, 1);
-    ah->addWidget(m_enrollFaceButton);
-    root->addWidget(m_arcfacePanel);
+    ah->addLayout(row);
+    ah->addWidget(new QLabel("会议内可见人脸条目", m_arcfacePanel));
+    ah->addWidget(m_roomFaceList);
+
+    auto *content = new QWidget(this);
+    auto *contentLayout = new QHBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(12);
+
+    auto *sideBar = new QWidget(content);
+    sideBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    sideBar->setMinimumWidth(320);
+    sideBar->setMaximumWidth(360);
+    auto *sideLayout = new QVBoxLayout(sideBar);
+    sideLayout->setContentsMargins(0, 0, 0, 0);
+    sideLayout->setSpacing(10);
+    sideLayout->addWidget(protectionPanel);
+    sideLayout->addWidget(m_arcfacePanel, 1);
+
+    contentLayout->addWidget(m_gridHost, 1);
+    contentLayout->addWidget(sideBar);
+    root->addWidget(content, 1);
 
     auto *floating = new QWidget(this);
     floating->setObjectName("floatingBar");
@@ -113,10 +141,17 @@ MeetingWindow::MeetingWindow(QWidget *parent)
         emit protectionLevelChanged(levels.value(id, "低"));
     });
     connect(m_enrollFaceButton, &QPushButton::clicked, this, [this]() {
-        const QString userId = m_enrollUserCombo->currentText().trimmed();
-        if (!userId.isEmpty()) {
-            emit enrollFaceRequested(userId);
+        emit enrollFacesRequested(m_enrollFaceNameEdit->text().trimmed());
+    });
+    connect(m_roomFaceList, &QListWidget::itemChanged, this, [this](QListWidgetItem *) {
+        QStringList selected;
+        for (int i = 0; i < m_roomFaceList->count(); ++i) {
+            QListWidgetItem *item = m_roomFaceList->item(i);
+            if (item && item->checkState() == Qt::Checked) {
+                selected << item->data(Qt::UserRole).toString();
+            }
         }
+        emit roomWhitelistChanged(selected);
     });
 }
 
@@ -168,18 +203,22 @@ void MeetingWindow::setArcFaceEnabled(bool enabled)
     m_arcfacePanel->setVisible(enabled);
     m_arcfaceStatusLabel->setText(enabled ? QStringLiteral("ArcFace: 已启用")
                                          : QStringLiteral("ArcFace: 关闭"));
-    m_enrollFaceButton->setEnabled(enabled && m_enrollUserCombo->count() > 0);
+    m_enrollFaceButton->setEnabled(enabled);
 }
 
-void MeetingWindow::setEnrollableUsers(const QStringList &users)
+void MeetingWindow::setMeetingFaceProfiles(const QList<FaceProfileSummary> &profiles, const QStringList &selectedProfileKeys)
 {
-    m_enrollUserCombo->clear();
-    for (const QString &user : users) {
-        if (!user.trimmed().isEmpty()) {
-            m_enrollUserCombo->addItem(user.trimmed());
-        }
+    m_roomFaceList->blockSignals(true);
+    m_roomFaceList->clear();
+    for (const FaceProfileSummary &profile : profiles) {
+        if (profile.profileKey.trimmed().isEmpty()) continue;
+        auto *item = new QListWidgetItem(profile.displayName(), m_roomFaceList);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setData(Qt::UserRole, profile.profileKey);
+        item->setCheckState(selectedProfileKeys.contains(profile.profileKey) ? Qt::Checked : Qt::Unchecked);
     }
-    m_enrollFaceButton->setEnabled(m_enrollUserCombo->count() > 0 && m_arcfacePanel->isVisible());
+    m_roomFaceList->blockSignals(false);
+    m_enrollFaceButton->setEnabled(m_arcfacePanel->isVisible());
 }
 
 void MeetingWindow::rebuildGrid(const QStringList &participants)
@@ -199,6 +238,13 @@ void MeetingWindow::rebuildGrid(const QStringList &participants)
         if (i > 0) tile->setMediaState(true, true);
         m_tiles.append(tile);
         m_grid->addWidget(tile, i / cols, i % cols);
+    }
+    const int rows = (count + cols - 1) / cols;
+    for (int col = 0; col < cols; ++col) {
+        m_grid->setColumnStretch(col, 1);
+    }
+    for (int row = 0; row < rows; ++row) {
+        m_grid->setRowStretch(row, 1);
     }
 }
 

@@ -133,6 +133,14 @@ class FaceEnrollRequest(BaseModel):
     trace_id: Optional[str] = None
 
 
+class FaceEnrollManyRequest(BaseModel):
+    room_id: str
+    image: str
+    label_prefix: Optional[str] = None
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
+
+
 class FaceClearRequest(BaseModel):
     room_id: str
     request_id: Optional[str] = None
@@ -528,6 +536,51 @@ def face_enroll(req: FaceEnrollRequest) -> dict:
         "room_id": room_id,
         "user_id": user_id,
         "template_count": count,
+        "request_id": request_id,
+        "trace_id": trace_id,
+    }
+
+
+@app.post(f"{CONFIG.api_prefix}/face/enroll_many")
+def face_enroll_many(req: FaceEnrollManyRequest) -> dict:
+    request_id = req.request_id or str(uuid.uuid4())
+    trace_id = req.trace_id or str(uuid.uuid4())
+    room_id = req.room_id.strip()
+    if not room_id:
+        raise ApiError("INVALID_ENROLL_PAYLOAD", "room_id is required", 400, request_id, trace_id)
+
+    image = decode_base64_image(req.image, request_id, trace_id)
+    faces = FACE_PIPELINE.recognizer.detect_faces(image)
+    if not faces:
+        raise ApiError("FACE_NOT_FOUND", "No face detected for enrollment", 400, request_id, trace_id)
+    prefix = (req.label_prefix or "").strip() or "当前画面人脸"
+    enrolled: list[dict[str, Any]] = []
+    ordered_faces = sorted(faces, key=lambda f: (f.bbox[0], f.bbox[1]))
+    multi = len(ordered_faces) > 1
+    for index, face in enumerate(ordered_faces, start=1):
+        face_id = f"live::{request_id}::{index}"
+        label = f"{prefix}-{index}" if multi else prefix
+        embedding = FACE_PIPELINE.recognizer.embed_face(image, face.bbox)
+        count = FACE_GALLERY.enroll(room_id, face_id, embedding)
+        enrolled.append(
+            {
+                "face_id": face_id,
+                "label": label,
+                "bbox": list(face.bbox),
+                "template_count": count,
+            }
+        )
+    log_event(
+        "face_enrolled_many",
+        request_id=request_id,
+        trace_id=trace_id,
+        room_id=room_id,
+        face_count=len(enrolled),
+    )
+    return {
+        "status": "enrolled",
+        "room_id": room_id,
+        "entries": enrolled,
         "request_id": request_id,
         "trace_id": trace_id,
     }

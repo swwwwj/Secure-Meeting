@@ -1,10 +1,12 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
-import hashlib
-import hmac
 import uuid
+import base64
 from datetime import datetime, timedelta
+import urllib.request
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
@@ -14,10 +16,14 @@ from sqlalchemy.orm import Session
 from audit import add_audit_event
 from config import load_config
 from db import SessionLocal
-from models import Participant, Room, Session as UserSession, User
+from models import FaceProfile, FaceProfileEntry, Participant, Room, Session as UserSession, User
 from schemas import (
     ApiErrorBody,
     CreateRoomRequest,
+    FaceProfileDetail,
+    FaceProfileEnrollRequest,
+    FaceProfileQueryRequest,
+    FaceProfileSummary,
     LoginRequest,
     LoginResponse,
     LogoutRequest,
@@ -98,6 +104,63 @@ def verify_password(password: str, password_hash: str) -> bool:
     _, salt, expected = parts
     got = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000).hex()
     return hmac.compare_digest(got, expected)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.replace(microsecond=0).isoformat() + "Z"
+
+
+def _validate_face_image(image_base64: str, request_id: str, trace_id: str) -> str:
+    if not image_base64.strip():
+        raise ApiError("INVALID_FACE_PROFILE", "Face profile image is required", 400, request_id, trace_id)
+    try:
+        base64.b64decode(image_base64, validate=True)
+    except Exception as exc:
+        raise ApiError("INVALID_FACE_PROFILE", f"Invalid face profile image: {exc}", 400, request_id, trace_id) from exc
+    return image_base64
+
+
+def _normalize_face_label(label: str | None) -> str:
+    normalized = (label or "").strip()
+    return normalized[:64] if normalized else "默认"
+
+
+def _profile_key(username: str, label: str) -> str:
+    return f"{username}::{label}"
+
+
+# #region debug-point D:meeting-server-face-profiles
+def _post_debug_event(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    server_url = "http://127.0.0.1:7777/event"
+    session_id = "face-profile-upload"
+    try:
+        with open(".dbg/face-profile-upload.env", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("DEBUG_SERVER_URL="):
+                    server_url = line.split("=", 1)[1].strip()
+                elif line.startswith("DEBUG_SESSION_ID="):
+                    session_id = line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    payload = {
+        "sessionId": session_id,
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "msg": message,
+        "data": data,
+    }
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(
+                server_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+        ).read()
+    except Exception:
+        pass
+# #endregion
 
 
 def _audit_failure(
@@ -310,6 +373,156 @@ def logout(
     add_audit_event(db, "user_logout", user.id, None, request_id, trace_id, {"username": user.username})
     db.commit()
     return {"request_id": request_id, "trace_id": trace_id, "status": "logged_out"}
+
+
+@app.post(f"{CONFIG.api_prefix}/face-profiles/me")
+def upsert_face_profile(
+    req: FaceProfileEnrollRequest,
+    db: Session = Depends(get_db),
+    x_session_token: str | None = Header(default=None),
+) -> dict:
+    request_id = _rid(req.request_id)
+    trace_id = _tid(req.trace_id)
+    # #region debug-point D:face-profile-upsert
+    _post_debug_event(
+        "D",
+        "meeting_server/app.py:upsert_face_profile",
+        "[DEBUG] face profile upsert invoked",
+        {"request_id": request_id, "trace_id": trace_id, "token_empty": not bool(x_session_token), "image_len": len(req.image or ""),
+         "label": req.label or ""},
+    )
+    # #endregion
+    user = _resolve_user(db, x_session_token, request_id, trace_id, "face-profiles/me")
+    image_base64 = _validate_face_image(req.image, request_id, trace_id)
+    profile_name = _normalize_face_label(req.label)
+    profile = db.scalar(
+        select(FaceProfileEntry).where(
+            FaceProfileEntry.user_id == user.id,
+            FaceProfileEntry.profile_name == profile_name,
+        )
+    )
+    now = datetime.utcnow()
+    if profile is None:
+        profile = FaceProfileEntry(
+            user_id=user.id,
+            profile_name=profile_name,
+            image_base64=image_base64,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(profile)
+        event_type = "face_profile_created"
+    else:
+        profile.image_base64 = image_base64
+        profile.updated_at = now
+        event_type = "face_profile_updated"
+
+    add_audit_event(db, event_type, user.id, None, request_id, trace_id, {"username": user.username})
+    db.commit()
+    # #region debug-point D:face-profile-upsert-ok
+    _post_debug_event(
+        "D",
+        "meeting_server/app.py:upsert_face_profile:ok",
+        "[DEBUG] face profile upsert succeeded",
+        {"request_id": request_id, "trace_id": trace_id, "username": user.username, "label": profile_name, "event_type": event_type},
+    )
+    # #endregion
+    return {
+        "request_id": request_id,
+        "trace_id": trace_id,
+        "profile_key": _profile_key(user.username, profile_name),
+        "username": user.username,
+        "label": profile_name,
+        "updated_at": _iso(profile.updated_at),
+        "status": "stored",
+    }
+
+
+@app.get(f"{CONFIG.api_prefix}/face-profiles")
+def list_face_profiles(
+    db: Session = Depends(get_db),
+    x_session_token: str | None = Header(default=None),
+) -> dict:
+    request_id = str(uuid.uuid4())
+    trace_id = str(uuid.uuid4())
+    # #region debug-point E:list-face-profiles
+    _post_debug_event(
+        "E",
+        "meeting_server/app.py:list_face_profiles",
+        "[DEBUG] list face profiles invoked",
+        {"request_id": request_id, "trace_id": trace_id, "token_empty": not bool(x_session_token)},
+    )
+    # #endregion
+    _resolve_user(db, x_session_token, request_id, trace_id, "face-profiles")
+    rows = db.execute(
+        select(User.username, FaceProfileEntry.profile_name, FaceProfileEntry.updated_at)
+        .join(FaceProfileEntry, FaceProfileEntry.user_id == User.id)
+        .order_by(User.username.asc(), FaceProfileEntry.profile_name.asc())
+    ).all()
+    profiles = [
+        FaceProfileSummary(profile_key=_profile_key(username, label), username=username, label=label, updated_at=_iso(updated_at)).model_dump()
+        if hasattr(FaceProfileSummary, "model_dump")
+        else FaceProfileSummary(profile_key=_profile_key(username, label), username=username, label=label, updated_at=_iso(updated_at)).dict()
+        for username, label, updated_at in rows
+    ]
+    # #region debug-point E:list-face-profiles-ok
+    _post_debug_event(
+        "E",
+        "meeting_server/app.py:list_face_profiles:ok",
+        "[DEBUG] list face profiles succeeded",
+        {"request_id": request_id, "trace_id": trace_id, "profile_count": len(profiles)},
+    )
+    # #endregion
+    return {"request_id": request_id, "trace_id": trace_id, "profiles": profiles}
+
+
+@app.post(f"{CONFIG.api_prefix}/face-profiles/query")
+def query_face_profiles(
+    req: FaceProfileQueryRequest,
+    db: Session = Depends(get_db),
+    x_session_token: str | None = Header(default=None),
+) -> dict:
+    request_id = _rid(req.request_id)
+    trace_id = _tid(req.trace_id)
+    _resolve_user(db, x_session_token, request_id, trace_id, "face-profiles/query")
+    profile_keys = [value.strip() for value in req.profile_keys if value.strip()]
+    names = [name.strip() for name in req.usernames if name.strip()]
+    if not profile_keys and not names:
+        return {"request_id": request_id, "trace_id": trace_id, "profiles": []}
+    rows_query = (
+        select(User.username, FaceProfileEntry.profile_name, FaceProfileEntry.image_base64, FaceProfileEntry.updated_at)
+        .join(FaceProfileEntry, FaceProfileEntry.user_id == User.id)
+    )
+    if profile_keys:
+        allowed_keys = set(profile_keys)
+        rows = [
+            row
+            for row in db.execute(rows_query.order_by(User.username.asc(), FaceProfileEntry.profile_name.asc())).all()
+            if _profile_key(row[0], row[1]) in allowed_keys
+        ]
+    else:
+        rows = db.execute(
+            rows_query.where(User.username.in_(names)).order_by(User.username.asc(), FaceProfileEntry.profile_name.asc())
+        ).all()
+    profiles = [
+        FaceProfileDetail(
+            profile_key=_profile_key(username, label),
+            username=username,
+            label=label,
+            image=image,
+            updated_at=_iso(updated_at),
+        ).model_dump()
+        if hasattr(FaceProfileDetail, "model_dump")
+        else FaceProfileDetail(
+            profile_key=_profile_key(username, label),
+            username=username,
+            label=label,
+            image=image,
+            updated_at=_iso(updated_at),
+        ).dict()
+        for username, label, image, updated_at in rows
+    ]
+    return {"request_id": request_id, "trace_id": trace_id, "profiles": profiles}
 
 
 @app.post(f"{CONFIG.api_prefix}/rooms/create")

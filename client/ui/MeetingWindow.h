@@ -5,13 +5,16 @@
 #include <QImage>
 #include <QList>
 
+#include "services/UserService.h"
+
 class QLabel;
 class QGridLayout;
 class QToolButton;
 class QPushButton;
 class VideoWidget;
 class QButtonGroup;
-class QComboBox;
+class QLineEdit;
+class QListWidget;
 
 class MeetingWindow : public QWidget
 {
@@ -27,7 +30,7 @@ public:
     void clearPrimaryFrame();
     void setAIEnabled(bool enabled);
     void setArcFaceEnabled(bool enabled);
-    void setEnrollableUsers(const QStringList &users);
+    void setMeetingFaceProfiles(const QList<FaceProfileSummary> &profiles, const QStringList &selectedProfileKeys);
 
 signals:
     void leaveClicked();
@@ -35,7 +38,8 @@ signals:
     void microphoneToggled(bool enabled);
     void aiToggled(bool enabled);
     void protectionLevelChanged(const QString &level);
-    void enrollFaceRequested(const QString &userId);
+    void enrollFacesRequested(const QString &labelPrefix);
+    void roomWhitelistChanged(const QStringList &selectedProfileKeys);
 
 private:
     void rebuildGrid(const QStringList &participants);
@@ -54,6 +58,7 @@ private:
     QButtonGroup *m_protectionGroup;
     QWidget *m_arcfacePanel;
     QLabel *m_arcfaceStatusLabel;
-    QComboBox *m_enrollUserCombo;
+    QLineEdit *m_enrollFaceNameEdit;
     QPushButton *m_enrollFaceButton;
+    QListWidget *m_roomFaceList;
 };

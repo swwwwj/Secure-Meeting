@@ -1,5 +1,7 @@
 #pragma once
 
+#include "services/UserService.h"
+
 #include <QImage>
 #include <QObject>
 #include <QStringList>
@@ -30,6 +32,11 @@ public:
     virtual void enrollFace(const QString &userId, const QImage &frame) {
         Q_UNUSED(userId);
         Q_UNUSED(frame);
+    }
+    virtual QList<FaceProfileSummary> enrollFaces(const QString &labelPrefix, const QImage &frame) {
+        Q_UNUSED(labelPrefix);
+        Q_UNUSED(frame);
+        return {};
     }
 
 signals:

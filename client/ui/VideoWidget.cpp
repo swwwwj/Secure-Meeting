@@ -5,6 +5,7 @@
 #include <QVBoxLayout>
 #include <QPixmap>
 #include <QResizeEvent>
+#include <QSizePolicy>
 
 VideoWidget::VideoWidget(const QString &participant, QWidget *parent)
     : QWidget(parent)
@@ -14,7 +15,8 @@ VideoWidget::VideoWidget(const QString &participant, QWidget *parent)
     , m_micChip(new QLabel("Mic", this))
 {
     setObjectName("videoCard");
-    setMinimumSize(280, 170);
+    setMinimumSize(320, 220);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(10, 10, 10, 10);

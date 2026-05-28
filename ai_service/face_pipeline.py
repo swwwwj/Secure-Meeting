@@ -22,6 +22,7 @@ class FaceBox:
     matched_user: str | None = None
     similarity: float = 0.0
     blurred: bool = False
+    embedding: np.ndarray | None = field(default=None, repr=False, compare=False)
 
 
 class FaceRecognizer:
@@ -82,6 +83,7 @@ class InsightFaceRecognizer(FaceRecognizer):
         self.device = device
         self._app = None
         self._load_error: str | None = None
+        self._last_embeddings: dict[tuple[int, int, int, int], np.ndarray] = {}
 
     def _ensure(self) -> None:
         if self._app is not None or self._load_error is not None:
@@ -112,26 +114,45 @@ class InsightFaceRecognizer(FaceRecognizer):
         self._ensure()
         if self._app is None:
             raise RuntimeError(self.unavailable_reason)
+        self._last_embeddings.clear()
         faces: list[FaceBox] = []
         for face in self._app.get(image):
             x1, y1, x2, y2 = [int(v) for v in face.bbox.astype(int).tolist()]
-            faces.append(FaceBox(bbox=(x1, y1, x2, y2), confidence=float(face.det_score)))
+            bbox = (x1, y1, x2, y2)
+            emb = np.asarray(face.normed_embedding, dtype=np.float32)
+            if emb.size == 0:
+                emb = np.asarray(face.embedding, dtype=np.float32)
+            norm = np.linalg.norm(emb)
+            if norm > 1e-6:
+                emb = emb / norm
+            self._last_embeddings[bbox] = emb
+            faces.append(FaceBox(bbox=bbox, confidence=float(face.det_score), embedding=emb))
         return faces
 
     def embed_face(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
         self._ensure()
         if self._app is None:
             raise RuntimeError(self.unavailable_reason)
+        cached = self._last_embeddings.get(bbox)
+        if cached is not None:
+            return cached
         faces = self._app.get(image)
         if not faces:
             return MockFaceRecognizer().embed_face(image, bbox)
-        best = max(faces, key=lambda f: f.det_score)
+        best = min(
+            faces,
+            key=lambda f: sum(
+                abs(int(v1) - int(v2))
+                for v1, v2 in zip(f.bbox.astype(int).tolist(), bbox)
+            ),
+        )
         emb = np.asarray(best.normed_embedding, dtype=np.float32)
         if emb.size == 0:
             emb = np.asarray(best.embedding, dtype=np.float32)
         norm = np.linalg.norm(emb)
         if norm > 1e-6:
             emb = emb / norm
+        self._last_embeddings[bbox] = emb
         return emb
 
 
@@ -193,6 +214,18 @@ class FacePrivacyPipeline:
         self._frame_index = 0
         self._last_faces: list[FaceBox] = []
 
+    @staticmethod
+    def _clone_face(face: FaceBox) -> FaceBox:
+        emb = None if face.embedding is None else np.copy(face.embedding)
+        return FaceBox(
+            bbox=face.bbox,
+            confidence=face.confidence,
+            matched_user=face.matched_user,
+            similarity=face.similarity,
+            blurred=face.blurred,
+            embedding=emb,
+        )
+
     def process(
         self,
         image: np.ndarray,
@@ -214,22 +247,31 @@ class FacePrivacyPipeline:
         start = time.perf_counter()
         try:
             self._frame_index += 1
-            if self._frame_index % self.detect_every_n_frames == 0 or not self._last_faces:
+            reran_detection = self._frame_index % self.detect_every_n_frames == 0 or not self._last_faces
+            if reran_detection:
                 faces = self.recognizer.detect_faces(image)
-                self._last_faces = faces
             else:
-                faces = [FaceBox(bbox=f.bbox, confidence=f.confidence) for f in self._last_faces]
+                faces = [self._clone_face(f) for f in self._last_faces]
 
             to_blur: list[FaceBox] = []
             face_results: list[FaceBox] = []
-            for face in faces:
-                emb = self.recognizer.embed_face(image, face.bbox)
-                matched_user, score = self.gallery.match_user(room_id, emb, whitelist, self.match_threshold)
-                face.matched_user = matched_user
-                face.similarity = score
-                if matched_user is None:
-                    to_blur.append(face)
-                face_results.append(face)
+            if reran_detection:
+                for face in faces:
+                    emb = face.embedding
+                    if emb is None:
+                        emb = self.recognizer.embed_face(image, face.bbox)
+                    matched_user, score = self.gallery.match_user(room_id, emb, whitelist, self.match_threshold)
+                    face.embedding = emb
+                    face.matched_user = matched_user
+                    face.similarity = score
+                    face.blurred = matched_user is None
+                    if face.blurred:
+                        to_blur.append(face)
+                    face_results.append(face)
+                self._last_faces = [self._clone_face(f) for f in face_results]
+            else:
+                face_results = faces
+                to_blur = [f for f in face_results if f.matched_user is None]
 
             processed = image
             blurred_count = 0

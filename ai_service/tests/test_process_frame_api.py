@@ -6,6 +6,9 @@ import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
+from face_pipeline import FaceBox, FaceGallery, FacePrivacyPipeline, FaceRecognizer
+from pipeline import RegionProtector
+
 
 def _make_image_b64() -> str:
     img = np.zeros((48, 48, 3), dtype=np.uint8)
@@ -210,3 +213,53 @@ def test_face_privacy_without_enrollment_blurs():
     assert resp.status_code == 200
     body = resp.json()
     assert body["faces_blurred"] >= 1
+
+
+class _CountingRecognizer(FaceRecognizer):
+    def __init__(self) -> None:
+        self.detect_calls = 0
+        self.embed_calls = 0
+
+    def detect_faces(self, image: np.ndarray) -> list[FaceBox]:
+        self.detect_calls += 1
+        left = np.ones(4, dtype=np.float32)
+        left = left / np.linalg.norm(left)
+        right = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        return [
+            FaceBox(bbox=(0, 0, 20, 20), confidence=0.95, embedding=left),
+            FaceBox(bbox=(24, 0, 44, 20), confidence=0.90, embedding=right),
+        ]
+
+    def embed_face(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        self.embed_calls += 1
+        raise AssertionError("cached embeddings should be reused instead of recomputing")
+
+
+def test_face_privacy_keeps_whitelist_face_visible_and_blurs_other_faces():
+    recognizer = _CountingRecognizer()
+    gallery = FaceGallery()
+    protector = RegionProtector(blur_method="gaussian", blur_intensity=9)
+    pipeline = FacePrivacyPipeline(
+        recognizer=recognizer,
+        protector=protector,
+        gallery=gallery,
+        match_threshold=0.8,
+        detect_every_n_frames=3,
+    )
+    alice_embedding = np.ones(4, dtype=np.float32)
+    alice_embedding = alice_embedding / np.linalg.norm(alice_embedding)
+    gallery.enroll("room-1", "alice", alice_embedding)
+
+    image = np.full((48, 48, 3), 160, dtype=np.uint8)
+    out = pipeline.process(image.copy(), "room-1", ["alice"], True)
+    assert out["faces_detected"] == 2
+    assert out["faces_blurred"] == 1
+    matched = {tuple(face.bbox): face.matched_user for face in out["faces"]}
+    assert matched[(0, 0, 20, 20)] == "alice"
+    assert matched[(24, 0, 44, 20)] is None
+
+    out2 = pipeline.process(image.copy(), "room-1", ["alice"], True)
+    assert out2["faces_detected"] == 2
+    assert out2["faces_blurred"] == 1
+    assert recognizer.detect_calls == 1
+    assert recognizer.embed_calls == 0

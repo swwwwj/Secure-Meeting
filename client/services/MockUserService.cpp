@@ -1,5 +1,7 @@
 #include "services/MockUserService.h"
 
+#include <QBuffer>
+
 bool MockUserService::registerUser(const QString &userId, const QString &password)
 {
     m_lastError.clear();
@@ -40,12 +42,59 @@ bool MockUserService::logout()
     return true;
 }
 
+bool MockUserService::uploadMyFaceProfile(const QString &label, const QImage &image)
+{
+    m_lastError.clear();
+    if (m_currentUser.isEmpty() || image.isNull()) {
+        m_lastError = "请选择有效的人脸照片。";
+        return false;
+    }
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    const QString normalizedLabel = label.trimmed().isEmpty() ? QStringLiteral("默认") : label.trimmed();
+    const QString profileKey = QStringLiteral("%1::%2").arg(m_currentUser, normalizedLabel);
+    m_faceImages.insert(profileKey, QString::fromLatin1(bytes.toBase64()));
+    m_faceSummaries.insert(profileKey, FaceProfileSummary{profileKey, m_currentUser, normalizedLabel, QStringLiteral("mock")});
+    return true;
+}
+
+QList<FaceProfileSummary> MockUserService::listFaceProfiles()
+{
+    QList<FaceProfileSummary> profiles;
+    const auto values = m_faceSummaries.values();
+    for (const FaceProfileSummary &summary : values) profiles.append(summary);
+    return profiles;
+}
+
+QList<FaceProfileRecord> MockUserService::fetchFaceProfiles(const QStringList &profileKeys)
+{
+    QList<FaceProfileRecord> profiles;
+    for (const QString &profileKey : profileKeys) {
+        const QString trimmed = profileKey.trimmed();
+        if (trimmed.isEmpty() || !m_faceImages.contains(trimmed) || !m_faceSummaries.contains(trimmed)) continue;
+        const FaceProfileSummary summary = m_faceSummaries.value(trimmed);
+        profiles.append(FaceProfileRecord{summary.profileKey,
+                                          summary.username,
+                                          summary.label,
+                                          m_faceImages.value(trimmed),
+                                          QStringLiteral("mock")});
+    }
+    return profiles;
+}
+
 QStringList MockUserService::getParticipants() const
 {
     if (m_currentUser.isEmpty()) {
         return {"You"};
     }
     return {m_currentUser};
+}
+
+QString MockUserService::currentUserName() const
+{
+    return m_currentUser;
 }
 
 QString MockUserService::sessionToken() const

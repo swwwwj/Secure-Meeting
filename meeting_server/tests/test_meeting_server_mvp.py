@@ -70,6 +70,28 @@ def test_meeting_server_auth_and_room_flow(tmp_path: Path):
     token = login_body["session_token"]
     assert login_body["user_id"] > 0
 
+    face_profile = client.post(
+        "/api/v1/face-profiles/me",
+        json={"label": "正脸", "image": "ZmFrZS1mYWNlLWltYWdl"},
+        headers={"x-session-token": token},
+    )
+    assert face_profile.status_code == 200
+    assert face_profile.json()["status"] == "stored"
+    second_face_profile = client.post(
+        "/api/v1/face-profiles/me",
+        json={"label": "侧脸", "image": "ZmFrZS1mYWNlLWltYWdlLTI="},
+        headers={"x-session-token": token},
+    )
+    assert second_face_profile.status_code == 200
+
+    face_profile_list = client.get(
+        "/api/v1/face-profiles",
+        headers={"x-session-token": token},
+    )
+    assert face_profile_list.status_code == 200
+    profiles = face_profile_list.json()["profiles"]
+    assert [item["profile_key"] for item in profiles] == ["alice::侧脸", "alice::正脸"]
+
     create = client.post(
         "/api/v1/rooms/create",
         json={"room_code": "room-100"},
@@ -97,6 +119,16 @@ def test_meeting_server_auth_and_room_flow(tmp_path: Path):
     login_bob = client.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-pass-123"})
     assert login_bob.status_code == 200
     bob_token = login_bob.json()["session_token"]
+    bob_face_query = client.post(
+        "/api/v1/face-profiles/query",
+        json={"profile_keys": ["alice::正脸", "alice::侧脸", "bob::默认"]},
+        headers={"x-session-token": bob_token},
+    )
+    assert bob_face_query.status_code == 200
+    bob_face_profiles = bob_face_query.json()["profiles"]
+    assert len(bob_face_profiles) == 2
+    assert [item["profile_key"] for item in bob_face_profiles] == ["alice::侧脸", "alice::正脸"]
+    assert bob_face_profiles[1]["image"] == "ZmFrZS1mYWNlLWltYWdl"
     bob_join = client.post(
         "/api/v1/rooms/join",
         json={"room_code": "room-100"},
@@ -152,6 +184,7 @@ def test_meeting_server_auth_and_room_flow(tmp_path: Path):
     assert _audit_count(db_path, "policy_changed") >= 1
     assert _audit_count(db_path, "authorization_denied") >= 1
     assert _audit_count(db_path, "auth_failed") >= 1
+    assert _audit_count(db_path, "face_profile_created") >= 1
 
 
 def test_meeting_server_auth_required(tmp_path: Path):
