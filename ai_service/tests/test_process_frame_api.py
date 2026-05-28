@@ -263,3 +263,25 @@ def test_face_privacy_keeps_whitelist_face_visible_and_blurs_other_faces():
     assert out2["faces_blurred"] == 1
     assert recognizer.detect_calls == 1
     assert recognizer.embed_calls == 0
+
+
+def test_face_privacy_with_empty_whitelist_blurs_all_faces():
+    recognizer = _CountingRecognizer()
+    gallery = FaceGallery()
+    protector = RegionProtector(blur_method="gaussian", blur_intensity=9)
+    pipeline = FacePrivacyPipeline(
+        recognizer=recognizer,
+        protector=protector,
+        gallery=gallery,
+        match_threshold=0.8,
+        detect_every_n_frames=1,
+    )
+    alice_embedding = np.ones(4, dtype=np.float32)
+    alice_embedding = alice_embedding / np.linalg.norm(alice_embedding)
+    gallery.enroll("room-2", "alice", alice_embedding)
+
+    image = np.full((48, 48, 3), 160, dtype=np.uint8)
+    out = pipeline.process(image.copy(), "room-2", [], True)
+    assert out["faces_detected"] == 2
+    assert out["faces_blurred"] == 2
+    assert all(face.matched_user is None for face in out["faces"])

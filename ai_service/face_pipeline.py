@@ -178,10 +178,12 @@ class FaceGallery:
 
     def match_user(self, room_id: str, embedding: np.ndarray, whitelist: set[str], threshold: float) -> tuple[str | None, float]:
         room = self._rooms.get(room_id, {})
+        if not whitelist:
+            return None, -1.0
         best_user: str | None = None
         best_score = -1.0
         for user_id, templates in room.items():
-            if whitelist and user_id not in whitelist:
+            if user_id not in whitelist:
                 continue
             for template in templates:
                 score = float(np.dot(embedding, template))
