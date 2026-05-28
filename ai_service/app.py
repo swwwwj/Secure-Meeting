@@ -43,6 +43,8 @@ class ServiceConfig(BaseModel):
     bbox_smoothing_alpha: float = 0.7
     blur_method: Literal["gaussian", "mosaic"] = "gaussian"
     blur_intensity: int = 17
+    output_image_format: Literal["png", "jpeg"] = "png"
+    output_jpeg_quality: int = 70
     sensitive_labels: list[str] = Field(default_factory=list)
     face_provider: Literal["mock", "insightface"] = "mock"
     arcface_model_dir: str = "models/arcface"
@@ -82,6 +84,10 @@ def _load_config() -> ServiceConfig:
         data["arcface_model_dir"] = os.getenv("SM_ARCFACE_MODEL_DIR")
     if os.getenv("SM_FACE_MATCH_THRESHOLD"):
         data["face_match_threshold"] = float(os.getenv("SM_FACE_MATCH_THRESHOLD", "0.45"))
+    if os.getenv("SM_OUTPUT_IMAGE_FORMAT"):
+        data["output_image_format"] = os.getenv("SM_OUTPUT_IMAGE_FORMAT")
+    if os.getenv("SM_OUTPUT_JPEG_QUALITY"):
+        data["output_jpeg_quality"] = int(os.getenv("SM_OUTPUT_JPEG_QUALITY", "70"))
     return ServiceConfig(**data)
 
 
@@ -122,6 +128,7 @@ class ProcessFrameRequest(BaseModel):
     whitelist_user_ids: list[str] = Field(default_factory=list)
     enable_face_privacy: bool = False
     enable_object_detection: Optional[bool] = None
+    return_image: bool = True
     debug: Optional[DebugOptions] = None
 
 
@@ -315,7 +322,11 @@ def decode_base64_image(image_base64: str, request_id: str, trace_id: str) -> np
 
 
 def encode_base64_image(image: np.ndarray, request_id: str, trace_id: str) -> str:
-    ok, encoded = cv2.imencode(".png", image)
+    if CONFIG.output_image_format == "jpeg":
+        quality = max(1, min(95, int(CONFIG.output_jpeg_quality)))
+        ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    else:
+        ok, encoded = cv2.imencode(".png", image)
     if not ok:
         raise ApiError("IMAGE_ENCODE_FAILED", "Image encode failed", 500, request_id, trace_id)
     return base64.b64encode(encoded.tobytes()).decode("utf-8")
@@ -365,7 +376,7 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
 
         if run_object:
             try:
-                pipeline_out = OBJECT_PIPELINE.process(image)
+                pipeline_out = OBJECT_PIPELINE.process(image, apply_blur=req.return_image)
                 processed = pipeline_out["processed"]
                 detection_ms = float(pipeline_out["detection_ms"])
                 detect_count = int(pipeline_out["detect_count"])
@@ -406,6 +417,7 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
                     room_id=room_id,
                     whitelist_user_ids=req.whitelist_user_ids,
                     enabled=True,
+                    apply_blur=req.return_image,
                 )
                 processed = face_out["processed"]
                 face_ms = float(face_out["face_ms"])
@@ -446,7 +458,7 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         trace_id=trace_id,
         model_version=model_version,
         policy_version=policy_version,
-        image=encode_base64_image(processed, request_id, trace_id),
+        image=encode_base64_image(processed, request_id, trace_id) if req.return_image else "",
         latency_ms=(time.perf_counter() - start) * 1000.0,
         detections=detections_payload,
         blurred_count=total_blurred,

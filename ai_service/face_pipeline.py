@@ -234,6 +234,7 @@ class FacePrivacyPipeline:
         room_id: str,
         whitelist_user_ids: list[str],
         enabled: bool,
+        apply_blur: bool = True,
     ) -> dict[str, Any]:
         if not enabled:
             return {
@@ -277,7 +278,7 @@ class FacePrivacyPipeline:
 
             processed = image
             blurred_count = 0
-            if to_blur:
+            if to_blur and apply_blur:
                 from pipeline import Detection
 
                 det_list = [
@@ -285,6 +286,10 @@ class FacePrivacyPipeline:
                     for f in to_blur
                 ]
                 processed, blurred_count = self.protector.blur_regions(image, det_list)
+                for f in to_blur:
+                    f.blurred = True
+            elif to_blur:
+                blurred_count = len(to_blur)
                 for f in to_blur:
                     f.blurred = True
 

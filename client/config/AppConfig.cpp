@@ -40,6 +40,9 @@ AppConfig AppConfig::load()
         if (obj.contains("ai_timeout_ms")) cfg.aiTimeoutMs = obj.value("ai_timeout_ms").toInt(cfg.aiTimeoutMs);
         if (obj.contains("meeting_timeout_ms")) cfg.meetingTimeoutMs = obj.value("meeting_timeout_ms").toInt(cfg.meetingTimeoutMs);
         if (obj.contains("max_in_flight_requests")) cfg.maxInFlightRequests = obj.value("max_in_flight_requests").toInt(cfg.maxInFlightRequests);
+        if (obj.contains("ai_min_frame_interval_ms")) cfg.aiMinFrameIntervalMs = obj.value("ai_min_frame_interval_ms").toInt(cfg.aiMinFrameIntervalMs);
+        if (obj.contains("ai_transport_max_edge")) cfg.aiTransportMaxEdge = obj.value("ai_transport_max_edge").toInt(cfg.aiTransportMaxEdge);
+        if (obj.contains("ai_transport_jpeg_quality")) cfg.aiTransportJpegQuality = obj.value("ai_transport_jpeg_quality").toInt(cfg.aiTransportJpegQuality);
         if (obj.contains("model_version")) cfg.modelVersion = obj.value("model_version").toString(cfg.modelVersion);
         if (obj.contains("policy_version")) cfg.policyVersion = obj.value("policy_version").toString(cfg.policyVersion);
         }
@@ -57,6 +60,12 @@ AppConfig AppConfig::load()
     if (!modelOverride.isEmpty()) cfg.modelVersion = modelOverride;
     const QString policyOverride = qEnvironmentVariable("SM_POLICY_VERSION");
     if (!policyOverride.isEmpty()) cfg.policyVersion = policyOverride;
+    const QString minFrameIntervalOverride = qEnvironmentVariable("SM_AI_MIN_FRAME_INTERVAL_MS");
+    if (!minFrameIntervalOverride.isEmpty()) cfg.aiMinFrameIntervalMs = minFrameIntervalOverride.toInt();
+    const QString transportMaxEdgeOverride = qEnvironmentVariable("SM_AI_TRANSPORT_MAX_EDGE");
+    if (!transportMaxEdgeOverride.isEmpty()) cfg.aiTransportMaxEdge = transportMaxEdgeOverride.toInt();
+    const QString transportJpegQualityOverride = qEnvironmentVariable("SM_AI_TRANSPORT_JPEG_QUALITY");
+    if (!transportJpegQualityOverride.isEmpty()) cfg.aiTransportJpegQuality = transportJpegQualityOverride.toInt();
     const QString useMockOverride = qEnvironmentVariable("SM_USE_MOCK_SERVICES");
     if (!useMockOverride.isEmpty()) {
         cfg.useMockServices = (useMockOverride.compare("true", Qt::CaseInsensitive) == 0

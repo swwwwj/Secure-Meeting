@@ -32,6 +32,11 @@ MainController::MainController(VideoSource *videoSource,
     connect(m_videoSource, &VideoSource::frameReady, this, &MainController::onRawFrameReady);
     connect(m_videoSource, &VideoSource::sourceWarning, this, &MainController::updateMeetingStatus);
     connect(m_aiProcessor, &AIProcessor::frameProcessed, this, &MainController::onProcessedFrameReady);
+    connect(m_aiProcessor, &AIProcessor::privacyRegionsUpdated, this, [this](const QVector<QRectF> &regions) {
+        if (m_view) {
+            m_view->meetingWindow()->setPrimaryPrivacyRegions(regions);
+        }
+    });
     connect(m_meetingService, &MeetingService::meetingStateChanged, this, &MainController::onMeetingStateChanged);
     if (m_cameraPermissionService) {
         connect(m_cameraPermissionService, &CameraPermissionService::cameraAccessResolved,
@@ -169,7 +174,7 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_view->meetingWindow()->setArcFaceEnabled(m_arcfaceEnabled);
 
     m_aiProcessor->clearPrivacyContext();
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, !m_arcfaceEnabled);
     if (m_arcfaceEnabled && !m_availableFaceProfiles.isEmpty()) {
         QStringList profileKeys;
         for (const FaceProfileSummary &summary : m_availableFaceProfiles) {
@@ -303,14 +308,14 @@ void MainController::onEnrollFacesRequested(const QString &labelPrefix)
     }
     m_whitelist = selected;
     m_view->meetingWindow()->setMeetingFaceProfiles(m_meetingFaceProfiles, m_whitelist);
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, !m_arcfaceEnabled);
     updateMeetingStatus(QString("已从当前画面录入 %1 张人脸，可在列表里勾选是否显示。").arg(enrolled.size()));
 }
 
 void MainController::onMeetingWhitelistChanged(const QStringList &selectedProfileKeys)
 {
     m_whitelist = selectedProfileKeys;
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, !m_arcfaceEnabled);
     if (m_view) {
         m_view->meetingWindow()->setStatusMessage(
             m_whitelist.isEmpty()
@@ -328,7 +333,7 @@ void MainController::onRawFrameReady(const QImage &frame)
 {
     if (!m_joined || !m_cameraEnabled) return;
     const bool preferProcessedPreview = m_aiProcessor->isEnabled() && m_arcfaceEnabled;
-    if (m_view && (!preferProcessedPreview || !m_hasProcessedAiFrame)) {
+    if (m_view) {
         m_view->meetingWindow()->setPrimaryFrame(frame);
     }
     if (m_pendingSelfEnroll && m_arcfaceEnabled && !m_userName.isEmpty()) {
@@ -343,7 +348,8 @@ void MainController::onRawFrameReady(const QImage &frame)
 void MainController::onProcessedFrameReady(const QImage &frame)
 {
     m_hasProcessedAiFrame = true;
-    if (m_view) {
+    const bool useProcessedPreview = m_aiProcessor->isEnabled() && !m_arcfaceEnabled;
+    if (m_view && useProcessedPreview) {
         m_view->meetingWindow()->setPrimaryFrame(frame);
     }
 }

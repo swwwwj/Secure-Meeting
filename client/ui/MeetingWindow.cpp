@@ -177,6 +177,13 @@ void MeetingWindow::setPrimaryFrame(const QImage &frame)
     }
 }
 
+void MeetingWindow::setPrimaryPrivacyRegions(const QVector<QRectF> &regions)
+{
+    if (!m_tiles.isEmpty()) {
+        m_tiles.first()->setPrivacyRegions(regions);
+    }
+}
+
 void MeetingWindow::setLocalMediaState(bool cameraOn, bool microphoneOn)
 {
     m_cameraButton->setChecked(cameraOn);

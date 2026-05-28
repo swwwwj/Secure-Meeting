@@ -4,7 +4,9 @@
 
 #include <QImage>
 #include <QObject>
+#include <QRectF>
 #include <QStringList>
+#include <QVector>
 
 // Abstract AI processing interface.
 // Future implementations can route to local model runtime, gRPC AI cluster, etc.
@@ -41,4 +43,5 @@ public:
 
 signals:
     void frameProcessed(const QImage &frame);
+    void privacyRegionsUpdated(const QVector<QRectF> &regions);
 };

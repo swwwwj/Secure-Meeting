@@ -13,6 +13,9 @@ struct AppConfig
     int aiTimeoutMs = 1200;
     int meetingTimeoutMs = 1500;
     int maxInFlightRequests = 2;
+    int aiMinFrameIntervalMs = 1000;
+    int aiTransportMaxEdge = 224;
+    int aiTransportJpegQuality = 50;
     QString modelVersion = "demo-model-v1";
     QString policyVersion = "policy-default-v1";
 

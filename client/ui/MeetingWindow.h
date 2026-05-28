@@ -4,6 +4,8 @@
 #include <QStringList>
 #include <QImage>
 #include <QList>
+#include <QRectF>
+#include <QVector>
 
 #include "services/UserService.h"
 
@@ -26,6 +28,7 @@ public:
     void setStatusMessage(const QString &message);
     void setParticipants(const QStringList &participants);
     void setPrimaryFrame(const QImage &frame);
+    void setPrimaryPrivacyRegions(const QVector<QRectF> &regions);
     void setLocalMediaState(bool cameraOn, bool microphoneOn);
     void clearPrimaryFrame();
     void setAIEnabled(bool enabled);

@@ -2,6 +2,7 @@
 
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QPainter>
 #include <QVBoxLayout>
 #include <QPixmap>
 #include <QResizeEvent>
@@ -62,6 +63,12 @@ void VideoWidget::setMediaState(bool cameraOn, bool microphoneOn)
     m_micChip->setText(microphoneOn ? "Mic" : "Muted");
 }
 
+void VideoWidget::setPrivacyRegions(const QVector<QRectF> &regions)
+{
+    m_privacyRegions = regions;
+    refreshFrame();
+}
+
 void VideoWidget::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
@@ -74,6 +81,23 @@ void VideoWidget::refreshFrame()
     const QSize size = m_canvas->size();
     if (size.isEmpty()) return;
     m_canvas->setText(QString());
-    m_canvas->setPixmap(QPixmap::fromImage(
-        m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::FastTransformation)));
+    QImage preview = m_lastFrame.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::FastTransformation);
+    if (!m_privacyRegions.isEmpty()) {
+        QPainter painter(&preview);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        for (const QRectF &normalized : m_privacyRegions) {
+            QRect rect(qRound(normalized.left() * preview.width()),
+                       qRound(normalized.top() * preview.height()),
+                       qRound(normalized.width() * preview.width()),
+                       qRound(normalized.height() * preview.height()));
+            rect = rect.normalized().adjusted(-8, -8, 8, 8).intersected(preview.rect());
+            if (!rect.isEmpty()) {
+                const QImage roi = preview.copy(rect);
+                const QSize tinySize(qMax(1, rect.width() / 16), qMax(1, rect.height() / 16));
+                const QImage tiny = roi.scaled(tinySize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+                painter.drawImage(rect, tiny.scaled(rect.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation));
+            }
+        }
+    }
+    m_canvas->setPixmap(QPixmap::fromImage(preview));
 }

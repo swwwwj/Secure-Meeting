@@ -13,11 +13,15 @@
 #include <QRegularExpression>
 #include <QTimer>
 #include <QUuid>
+#include <QtConcurrent/QtConcurrent>
 
 namespace {
 // #region debug-point F:http-ai-processor
 void postDebugEvent(const char *hypothesisId, const char *location, const QString &message, const QJsonObject &data)
 {
+    if (!qEnvironmentVariableIsSet("SM_DEBUG_EVENTS")) {
+        return;
+    }
     QString url = QStringLiteral("http://127.0.0.1:7777/event");
     QString sessionId = QStringLiteral("face-profile-upload");
     QFile envFile(QStringLiteral(".dbg/face-profile-upload.env"));
@@ -45,6 +49,33 @@ void postDebugEvent(const char *hypothesisId, const char *location, const QStrin
     manager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
 }
 // #endregion
+
+QByteArray encodeImageToBase64(const QImage &frame, int maxEdge, int jpegQuality, QSize *encodedSize)
+{
+    QImage transportFrame = frame;
+    const QSize size = frame.size();
+    const int longestEdge = qMax(size.width(), size.height());
+    const int edge = qMax(64, maxEdge);
+    if (longestEdge > edge) {
+        transportFrame = frame.scaled(edge, edge, Qt::KeepAspectRatio, Qt::FastTransformation);
+    }
+    if (encodedSize) {
+        *encodedSize = transportFrame.size();
+    }
+
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    const int quality = qMax(1, qMin(95, jpegQuality));
+    if (!transportFrame.save(&buffer, "JPEG", quality)) {
+        bytes.clear();
+        buffer.close();
+        buffer.setBuffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        transportFrame.save(&buffer, "PNG");
+    }
+    return bytes.toBase64();
+}
 }
 
 HttpAIProcessor::HttpAIProcessor(const QUrl &endpoint,
@@ -52,11 +83,17 @@ HttpAIProcessor::HttpAIProcessor(const QUrl &endpoint,
                                  int maxInFlightRequests,
                                  const QString &modelVersion,
                                  const QString &policyVersion,
+                                 int minFrameIntervalMs,
+                                 int transportMaxEdge,
+                                 int transportJpegQuality,
                                  QObject *parent)
     : AIProcessor(parent)
     , m_processEndpoint(endpoint)
     , m_timeoutMs(timeoutMs)
-    , m_maxInFlightRequests(maxInFlightRequests)
+    , m_maxInFlightRequests(qMax(1, maxInFlightRequests))
+    , m_minFrameIntervalMs(qMax(0, minFrameIntervalMs))
+    , m_transportMaxEdge(qMax(64, transportMaxEdge))
+    , m_transportJpegQuality(qMax(1, qMin(95, transportJpegQuality)))
     , m_modelVersion(modelVersion)
     , m_policyVersion(policyVersion)
 {
@@ -89,6 +126,9 @@ void HttpAIProcessor::setPrivacyContext(const QString &roomId,
     m_whitelistUserIds = whitelistUserIds;
     m_facePrivacyEnabled = facePrivacyEnabled;
     m_objectDetectionEnabled = objectDetectionEnabled;
+    m_cachedPrivacyRegions.clear();
+    m_havePrivacyMetadata = false;
+    emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     logEvent("privacy_context_set",
              {{"room_id", m_roomId},
               {"whitelist_count", m_whitelistUserIds.size()},
@@ -110,7 +150,9 @@ void HttpAIProcessor::clearPrivacyContext()
     if (m_roomId.isEmpty()) {
         m_roomId.clear();
         m_whitelistUserIds.clear();
-        m_lastProcessedFrame = QImage();
+        m_cachedPrivacyRegions.clear();
+        m_havePrivacyMetadata = false;
+        emit privacyRegionsUpdated(m_cachedPrivacyRegions);
         return;
     }
     const QString roomId = m_roomId;
@@ -122,7 +164,9 @@ void HttpAIProcessor::clearPrivacyContext()
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
     m_roomId.clear();
     m_whitelistUserIds.clear();
-    m_lastProcessedFrame = QImage();
+    m_cachedPrivacyRegions.clear();
+    m_havePrivacyMetadata = false;
+    emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     logEvent("privacy_context_cleared", {{"room_id", roomId}});
 }
 
@@ -134,7 +178,7 @@ void HttpAIProcessor::postEnroll(const QString &userId, const QImage &frame)
     QJsonObject body;
     body.insert("room_id", m_roomId);
     body.insert("user_id", userId.trimmed());
-    body.insert("image", QString::fromLatin1(imageToBase64(frame)));
+    body.insert("image", QString::fromLatin1(imageToBase64(frame, 640, 75)));
     body.insert("request_id", newId());
     body.insert("trace_id", newId());
 
@@ -165,7 +209,7 @@ QList<FaceProfileSummary> HttpAIProcessor::enrollFaces(const QString &labelPrefi
     QJsonObject body;
     body.insert("room_id", m_roomId);
     body.insert("label_prefix", labelPrefix.trimmed());
-    body.insert("image", QString::fromLatin1(imageToBase64(frame)));
+    body.insert("image", QString::fromLatin1(imageToBase64(frame, 640, 75)));
     body.insert("request_id", newId());
     body.insert("trace_id", newId());
 
@@ -206,7 +250,9 @@ void HttpAIProcessor::setEnabled(bool enabled)
 {
     m_enabled = enabled;
     if (!enabled) {
-        m_lastProcessedFrame = QImage();
+        m_cachedPrivacyRegions.clear();
+        m_havePrivacyMetadata = false;
+        emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     }
     logEvent("ai_toggle", {{"enabled", enabled}});
     // #region debug-point G:ai-toggle
@@ -242,26 +288,72 @@ void HttpAIProcessor::processFrame(const QImage &frame)
         return;
     }
 
-    const bool preferProcessedFrame = m_facePrivacyEnabled;
-    const int maxInFlight = preferProcessedFrame ? 1 : m_maxInFlightRequests;
-    if (m_inFlight.size() >= maxInFlight) {
+    const int maxInFlight = qMax(1, m_maxInFlightRequests);
+    if (m_encodeInFlight || m_inFlight.size() >= maxInFlight) {
         m_dropped += 1;
-        logEvent("frame_dropped",
-                 {{"reason", "backpressure"},
-                  {"in_flight", m_inFlight.size()},
-                  {"prefer_processed_frame", preferProcessedFrame}});
-        emit frameProcessed(preferProcessedFrame && !m_lastProcessedFrame.isNull() ? m_lastProcessedFrame : frame);
+        if (m_dropped % 30 == 1) {
+            logEvent("frame_dropped",
+                     {{"reason", "backpressure"},
+                      {"in_flight", m_inFlight.size()},
+                      {"encode_in_flight", m_encodeInFlight},
+                      {"max_in_flight", maxInFlight}});
+        }
+        logMetricsIfNeeded();
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_minFrameIntervalMs > 0 && m_lastFrameSentMs > 0 && (nowMs - m_lastFrameSentMs) < m_minFrameIntervalMs) {
+        m_dropped += 1;
+        if (m_dropped % 30 == 1) {
+            logEvent("frame_dropped",
+                     {{"reason", "rate_limited"},
+                      {"min_frame_interval_ms", m_minFrameIntervalMs},
+                      {"elapsed_ms", nowMs - m_lastFrameSentMs}});
+        }
         logMetricsIfNeeded();
         return;
     }
 
     const QString requestId = newId();
     const QString traceId = newId();
-    const QByteArray encoded = imageToBase64(frame);
+    const qint64 frameSequence = ++m_nextFrameSequence;
+    const int transportMaxEdge = m_transportMaxEdge;
+    const int transportJpegQuality = m_transportJpegQuality;
+    m_lastFrameSentMs = nowMs;
+    m_encodeInFlight = true;
+
+    auto *watcher = new QFutureWatcher<EncodedFrame>(this);
+    connect(watcher, &QFutureWatcher<EncodedFrame>::finished, this, [this, watcher]() {
+        m_encodeInFlight = false;
+        const EncodedFrame encoded = watcher->result();
+        watcher->deleteLater();
+        if (!m_enabled || encoded.imageBase64.isEmpty()) {
+            return;
+        }
+        if (m_inFlight.size() >= qMax(1, m_maxInFlightRequests)) {
+            m_dropped += 1;
+            logMetricsIfNeeded();
+            return;
+        }
+        postProcessRequest(encoded);
+    });
+    watcher->setFuture(QtConcurrent::run([frame, transportMaxEdge, transportJpegQuality, requestId, traceId, frameSequence]() {
+        EncodedFrame out;
+        out.requestId = requestId;
+        out.traceId = traceId;
+        out.frameSequence = frameSequence;
+        out.imageBase64 = encodeImageToBase64(frame, transportMaxEdge, transportJpegQuality, &out.transportSize);
+        return out;
+    }));
+}
+
+void HttpAIProcessor::postProcessRequest(const EncodedFrame &encoded)
+{
     QJsonObject body;
-    body.insert("image", QString::fromLatin1(encoded));
-    body.insert("request_id", requestId);
-    body.insert("trace_id", traceId);
+    body.insert("image", QString::fromLatin1(encoded.imageBase64));
+    body.insert("request_id", encoded.requestId);
+    body.insert("trace_id", encoded.traceId);
     body.insert("model_version", m_modelVersion);
     body.insert("policy_version", m_policyVersion);
     if (!m_roomId.isEmpty()) {
@@ -276,6 +368,7 @@ void HttpAIProcessor::processFrame(const QImage &frame)
     }
     body.insert("enable_face_privacy", m_facePrivacyEnabled);
     body.insert("enable_object_detection", m_objectDetectionEnabled);
+    body.insert("return_image", false);
     // #region debug-point H:frame-send
     postDebugEvent("H",
                    "client/services/HttpAIProcessor.cpp:processFrame:send",
@@ -283,7 +376,9 @@ void HttpAIProcessor::processFrame(const QImage &frame)
                    QJsonObject{{"room_id", m_roomId},
                                {"whitelist_count", m_whitelistUserIds.size()},
                                {"face_privacy", m_facePrivacyEnabled},
-                               {"object_detection", m_objectDetectionEnabled}});
+                               {"object_detection", m_objectDetectionEnabled},
+                               {"transport_max_edge", m_transportMaxEdge},
+                               {"transport_jpeg_quality", m_transportJpegQuality}});
     // #endregion
 
     QNetworkRequest request(m_processEndpoint);
@@ -293,13 +388,17 @@ void HttpAIProcessor::processFrame(const QImage &frame)
     QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     InFlightInfo info;
     info.timer.start();
-    info.requestId = requestId;
-    info.traceId = traceId;
+    info.requestId = encoded.requestId;
+    info.traceId = encoded.traceId;
     info.facePrivacyEnabled = m_facePrivacyEnabled;
+    info.frameSequence = encoded.frameSequence;
+    info.transportSize = encoded.transportSize;
     m_inFlight.insert(reply, info);
-    logEvent("frame_send", {{"request_id", requestId}, {"trace_id", traceId}, {"in_flight", m_inFlight.size()}});
+    if (m_framesIn % 30 == 0) {
+        logEvent("frame_send", {{"request_id", encoded.requestId}, {"trace_id", encoded.traceId}, {"in_flight", m_inFlight.size()}});
+    }
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, frame]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QByteArray payload = reply->readAll();
         const bool ok = (reply->error() == QNetworkReply::NoError);
         const InFlightInfo info = m_inFlight.value(reply);
@@ -307,25 +406,19 @@ void HttpAIProcessor::processFrame(const QImage &frame)
         m_totalLatencyMs += latencyMs;
         m_inFlight.remove(reply);
 
-        QImage output = frame;
         if (ok) {
             const QJsonDocument doc = QJsonDocument::fromJson(payload);
             const QJsonObject obj = doc.object();
-            const QByteArray outBase64 = obj.value("image").toString().toLatin1();
             m_totalInferenceMs += obj.value("latency_ms").toDouble(0.0);
-            const QImage decoded = base64ToImage(outBase64);
-            if (!decoded.isNull()) {
-                output = decoded;
-                m_lastProcessedFrame = decoded;
-            } else if (info.facePrivacyEnabled && !m_lastProcessedFrame.isNull()) {
-                output = m_lastProcessedFrame;
-            }
+            updateCachedPrivacyRegions(obj, info.transportSize);
             m_framesOut += 1;
-            logEvent("frame_ok",
-                     {{"request_id", info.requestId},
-                      {"trace_id", info.traceId},
-                      {"latency_ms", latencyMs},
-                      {"server_latency_ms", obj.value("latency_ms").toDouble(0.0)}});
+            if (m_framesOut % 30 == 0) {
+                logEvent("frame_ok",
+                         {{"request_id", info.requestId},
+                          {"trace_id", info.traceId},
+                          {"latency_ms", latencyMs},
+                          {"server_latency_ms", obj.value("latency_ms").toDouble(0.0)}});
+            }
             // #region debug-point H:frame-ok
             postDebugEvent("H",
                            "client/services/HttpAIProcessor.cpp:processFrame:ok",
@@ -338,9 +431,6 @@ void HttpAIProcessor::processFrame(const QImage &frame)
             // #endregion
         } else {
             m_failed += 1;
-            if (info.facePrivacyEnabled && !m_lastProcessedFrame.isNull()) {
-                output = m_lastProcessedFrame;
-            }
             logEvent("frame_fail",
                      {{"request_id", info.requestId},
                       {"trace_id", info.traceId},
@@ -355,43 +445,57 @@ void HttpAIProcessor::processFrame(const QImage &frame)
             // #endregion
         }
 
-        emit frameProcessed(output);
         logMetricsIfNeeded();
         reply->deleteLater();
     });
 }
 
-QByteArray HttpAIProcessor::imageToBase64(const QImage &frame) const
+QByteArray HttpAIProcessor::imageToBase64(const QImage &frame, int maxEdge, int jpegQuality, QSize *encodedSize) const
 {
-    QImage transportFrame = frame;
-    const QSize size = frame.size();
-    const int longestEdge = qMax(size.width(), size.height());
-    if (longestEdge > 640) {
-        transportFrame = frame.scaled(640,
-                                      640,
-                                      Qt::KeepAspectRatio,
-                                      Qt::FastTransformation);
-    }
-
-    QByteArray bytes;
-    QBuffer buffer(&bytes);
-    buffer.open(QIODevice::WriteOnly);
-    if (!transportFrame.save(&buffer, "JPEG", 75)) {
-        bytes.clear();
-        buffer.close();
-        buffer.setBuffer(&bytes);
-        buffer.open(QIODevice::WriteOnly);
-        transportFrame.save(&buffer, "PNG");
-    }
-    return bytes.toBase64();
+    return encodeImageToBase64(frame, maxEdge, jpegQuality, encodedSize);
 }
 
-QImage HttpAIProcessor::base64ToImage(const QByteArray &base64) const
+void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, const QSize &imageSize)
 {
-    const QByteArray bytes = QByteArray::fromBase64(base64);
-    QImage image;
-    image.loadFromData(bytes, "PNG");
-    return image;
+    m_cachedPrivacyRegions.clear();
+    m_havePrivacyMetadata = true;
+    if (imageSize.width() <= 0 || imageSize.height() <= 0) {
+        return;
+    }
+
+    const auto appendBox = [this, &imageSize](const QJsonArray &bbox) {
+        if (bbox.size() < 4) {
+            return;
+        }
+        const double x1 = bbox.at(0).toDouble();
+        const double y1 = bbox.at(1).toDouble();
+        const double x2 = bbox.at(2).toDouble();
+        const double y2 = bbox.at(3).toDouble();
+        QRectF normalized(QPointF(x1 / imageSize.width(), y1 / imageSize.height()),
+                          QPointF(x2 / imageSize.width(), y2 / imageSize.height()));
+        normalized = normalized.normalized().intersected(QRectF(0.0, 0.0, 1.0, 1.0));
+        if (normalized.width() > 0.0 && normalized.height() > 0.0) {
+            m_cachedPrivacyRegions.append(normalized);
+        }
+    };
+
+    const QJsonArray detections = response.value("detections").toArray();
+    for (const QJsonValue &value : detections) {
+        const QJsonObject det = value.toObject();
+        if (det.value("blurred").toBool(false) || det.value("sensitive").toBool(false)) {
+            appendBox(det.value("bbox").toArray());
+        }
+    }
+
+    const QJsonArray faces = response.value("faces").toArray();
+    for (const QJsonValue &value : faces) {
+        const QJsonObject face = value.toObject();
+        if (face.value("blurred").toBool(false)) {
+            appendBox(face.value("bbox").toArray());
+        }
+    }
+
+    emit privacyRegionsUpdated(m_cachedPrivacyRegions);
 }
 
 void HttpAIProcessor::logEvent(const QString &event, const QJsonObject &extra) const

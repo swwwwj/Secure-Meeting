@@ -4,7 +4,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia Concurrent)
 if(APPLE)
     find_package(Qt6 REQUIRED COMPONENTS CorePrivate)
     include("/opt/homebrew/Cellar/qtbase/6.11.1/lib/cmake/Qt6Core/Qt6QDarwinCameraPermissionPluginConfig.cmake")
@@ -84,6 +84,7 @@ target_link_libraries(SecureMeetingClient PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::Multimedia
+    Qt6::Concurrent
 )
 
 if(APPLE)

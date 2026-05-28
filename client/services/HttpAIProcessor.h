@@ -8,6 +8,8 @@
 
 #include <QElapsedTimer>
 
+#include <QFutureWatcher>
+
 #include <QHash>
 
 #include <QJsonObject>
@@ -16,7 +18,11 @@
 
 #include <QNetworkReply>
 
+#include <QRectF>
+
 #include <QUrl>
+
+#include <QVector>
 
 
 
@@ -37,6 +43,12 @@ public:
                              const QString &modelVersion,
 
                              const QString &policyVersion,
+
+                             int minFrameIntervalMs = 180,
+
+                             int transportMaxEdge = 384,
+
+                             int transportJpegQuality = 65,
 
                              QObject *parent = nullptr);
 
@@ -67,6 +79,14 @@ public:
 
 private:
 
+    struct EncodedFrame {
+        QByteArray imageBase64;
+        QSize transportSize;
+        QString requestId;
+        QString traceId;
+        qint64 frameSequence = 0;
+    };
+
     struct InFlightInfo {
 
         QElapsedTimer timer;
@@ -76,15 +96,19 @@ private:
         QString traceId;
 
         bool facePrivacyEnabled = false;
+
+        qint64 frameSequence = 0;
+
+        QSize transportSize;
     };
 
 
 
     QUrl apiUrl(const QString &path) const;
 
-    QByteArray imageToBase64(const QImage &frame) const;
+    QByteArray imageToBase64(const QImage &frame, int maxEdge, int jpegQuality, QSize *encodedSize = nullptr) const;
 
-    QImage base64ToImage(const QByteArray &base64) const;
+    void updateCachedPrivacyRegions(const QJsonObject &response, const QSize &transportSize);
 
     void logEvent(const QString &event, const QJsonObject &extra = {}) const;
 
@@ -93,6 +117,8 @@ private:
     QString newId() const;
 
     void postEnroll(const QString &userId, const QImage &frame);
+
+    void postProcessRequest(const EncodedFrame &encoded);
 
 
 
@@ -107,6 +133,12 @@ private:
     int m_timeoutMs = 1200;
 
     int m_maxInFlightRequests = 2;
+
+    int m_minFrameIntervalMs = 180;
+
+    int m_transportMaxEdge = 384;
+
+    int m_transportJpegQuality = 65;
 
     QString m_modelVersion;
 
@@ -136,7 +168,16 @@ private:
 
     mutable QHash<QNetworkReply *, InFlightInfo> m_inFlight;
 
-    QImage m_lastProcessedFrame;
+    QVector<QRectF> m_cachedPrivacyRegions;
+
+    bool m_havePrivacyMetadata = false;
+
+    qint64 m_lastFrameSentMs = 0;
+
+    qint64 m_nextFrameSequence = 0;
+
+    bool m_encodeInFlight = false;
+
 };
 
 

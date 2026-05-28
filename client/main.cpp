@@ -32,7 +32,10 @@ int main(int argc, char *argv[])
                                 cfg.aiTimeoutMs,
                                 cfg.maxInFlightRequests,
                                 cfg.modelVersion,
-                                cfg.policyVersion);
+                                cfg.policyVersion,
+                                cfg.aiMinFrameIntervalMs,
+                                cfg.aiTransportMaxEdge,
+                                cfg.aiTransportJpegQuality);
     aiProcessor.setEnabled(cfg.aiEnabledByDefault);
     std::unique_ptr<UserService> userService;
     std::unique_ptr<MeetingService> meetingService;
@@ -88,6 +91,9 @@ int main(int argc, char *argv[])
         {"ai_timeout_ms", cfg.aiTimeoutMs},
         {"meeting_timeout_ms", cfg.meetingTimeoutMs},
         {"max_in_flight_requests", cfg.maxInFlightRequests},
+        {"ai_min_frame_interval_ms", cfg.aiMinFrameIntervalMs},
+        {"ai_transport_max_edge", cfg.aiTransportMaxEdge},
+        {"ai_transport_jpeg_quality", cfg.aiTransportJpegQuality},
         {"model_version", cfg.modelVersion},
         {"policy_version", cfg.policyVersion}
     };

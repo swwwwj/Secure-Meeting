@@ -12,12 +12,14 @@
   "detector_device": "cpu",
   "yolo_model_path": "yolov8n.pt",
   "detection_confidence_threshold": 0.4,
-  "inference_image_size": 640,
-  "detector_timeout_ms": 180,
-  "detect_every_n_frames": 2,
+  "inference_image_size": 224,
+  "detector_timeout_ms": 120,
+  "detect_every_n_frames": 20,
   "bbox_smoothing_alpha": 0.75,
   "blur_method": "gaussian",
   "blur_intensity": 19,
+  "output_image_format": "jpeg",
+  "output_jpeg_quality": 50,
   "sensitive_labels": [
     "cell phone",
     "laptop",
@@ -28,6 +30,6 @@
   "face_provider": "insightface",
   "arcface_model_dir": "models/arcface",
   "face_match_threshold": 0.45,
-  "face_detect_every_n_frames": 2,
+  "face_detect_every_n_frames": 10,
   "face_model_version": "arcface-phase-d-v1"
 }
