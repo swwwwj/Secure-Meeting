@@ -78,9 +78,11 @@ class MockFaceRecognizer(FaceRecognizer):
 
 
 class InsightFaceRecognizer(FaceRecognizer):
-    def __init__(self, model_root: str, device: str = "cpu") -> None:
+    def __init__(self, model_root: str, device: str = "cpu", det_size: int = 640, det_thresh: float = 0.5) -> None:
         self.model_root = model_root
         self.device = device
+        self.det_size = max(320, int(det_size))
+        self.det_thresh = max(0.05, min(0.95, float(det_thresh)))
         self._app = None
         self._load_error: str | None = None
         self._last_embeddings: dict[tuple[int, int, int, int], np.ndarray] = {}
@@ -96,7 +98,7 @@ class InsightFaceRecognizer(FaceRecognizer):
         try:
             ctx_id = -1 if self.device == "cpu" else 0
             self._app = FaceAnalysis(name="buffalo_l", root=self.model_root)
-            self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            self._app.prepare(ctx_id=ctx_id, det_size=(self.det_size, self.det_size), det_thresh=self.det_thresh)
         except Exception as exc:  # pragma: no cover
             self._load_error = f"insightface init failed: {exc}"
 
@@ -228,6 +230,26 @@ class FacePrivacyPipeline:
             embedding=emb,
         )
 
+    @staticmethod
+    def _enforce_unique_matches(faces: list[FaceBox]) -> None:
+        best_index_by_user: dict[str, int] = {}
+        for index, face in enumerate(faces):
+            if face.matched_user is None:
+                continue
+            best_index = best_index_by_user.get(face.matched_user)
+            if best_index is None or face.similarity > faces[best_index].similarity:
+                best_index_by_user[face.matched_user] = index
+
+        for index, face in enumerate(faces):
+            if face.matched_user is None:
+                face.blurred = True
+                continue
+            if best_index_by_user.get(face.matched_user) == index:
+                face.blurred = False
+            else:
+                face.matched_user = None
+                face.blurred = True
+
     def process(
         self,
         image: np.ndarray,
@@ -268,9 +290,9 @@ class FacePrivacyPipeline:
                     face.matched_user = matched_user
                     face.similarity = score
                     face.blurred = matched_user is None
-                    if face.blurred:
-                        to_blur.append(face)
                     face_results.append(face)
+                self._enforce_unique_matches(face_results)
+                to_blur = [f for f in face_results if f.blurred]
                 self._last_faces = [self._clone_face(f) for f in face_results]
             else:
                 face_results = faces

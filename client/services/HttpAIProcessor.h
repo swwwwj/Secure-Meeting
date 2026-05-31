@@ -174,6 +174,8 @@ private:
 
     qint64 m_lastFrameSentMs = 0;
 
+    qint64 m_lastFrameCompletedMs = 0;
+
     qint64 m_nextFrameSequence = 0;
 
     bool m_encodeInFlight = false;

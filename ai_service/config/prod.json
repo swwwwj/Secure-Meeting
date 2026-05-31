@@ -30,6 +30,8 @@
   "face_provider": "insightface",
   "arcface_model_dir": "models/arcface",
   "face_match_threshold": 0.45,
+  "face_det_size": 512,
+  "face_det_thresh": 0.25,
   "face_detect_every_n_frames": 1,
   "face_model_version": "arcface-phase-d-v1"
 }

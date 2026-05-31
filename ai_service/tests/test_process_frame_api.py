@@ -265,6 +265,49 @@ def test_face_privacy_keeps_whitelist_face_visible_and_blurs_other_faces():
     assert recognizer.embed_calls == 0
 
 
+class _DuplicateMatchRecognizer(FaceRecognizer):
+    def detect_faces(self, image: np.ndarray) -> list[FaceBox]:
+        alice = np.ones(4, dtype=np.float32)
+        alice = alice / np.linalg.norm(alice)
+        alice_like = np.array([0.92, 0.23, 0.23, 0.23], dtype=np.float32)
+        alice_like = alice_like / np.linalg.norm(alice_like)
+        return [
+            FaceBox(bbox=(0, 0, 20, 20), confidence=0.95, embedding=alice),
+            FaceBox(bbox=(24, 0, 44, 20), confidence=0.90, embedding=alice_like),
+        ]
+
+    def embed_face(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        raise AssertionError("cached embeddings should be present")
+
+
+def test_face_privacy_blurs_duplicate_match_to_same_whitelist_identity():
+    recognizer = _DuplicateMatchRecognizer()
+    gallery = FaceGallery()
+    protector = RegionProtector(blur_method="gaussian", blur_intensity=9)
+    pipeline = FacePrivacyPipeline(
+        recognizer=recognizer,
+        protector=protector,
+        gallery=gallery,
+        match_threshold=0.8,
+        detect_every_n_frames=1,
+    )
+    alice_embedding = np.ones(4, dtype=np.float32)
+    alice_embedding = alice_embedding / np.linalg.norm(alice_embedding)
+    gallery.enroll("room-duplicate", "alice", alice_embedding)
+
+    image = np.full((48, 48, 3), 160, dtype=np.uint8)
+    out = pipeline.process(image.copy(), "room-duplicate", ["alice"], True)
+
+    assert out["faces_detected"] == 2
+    assert out["faces_blurred"] == 1
+    visible = [face for face in out["faces"] if not face.blurred]
+    blurred = [face for face in out["faces"] if face.blurred]
+    assert len(visible) == 1
+    assert len(blurred) == 1
+    assert visible[0].bbox == (0, 0, 20, 20)
+    assert blurred[0].bbox == (24, 0, 44, 20)
+
+
 def test_face_privacy_with_empty_whitelist_blurs_all_faces():
     recognizer = _CountingRecognizer()
     gallery = FaceGallery()

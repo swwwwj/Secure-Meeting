@@ -48,6 +48,9 @@ void VideoWidget::setParticipantName(const QString &name)
 
 void VideoWidget::setFrame(const QImage &frame)
 {
+    if (!m_lastFrame.isNull() && !m_privacyRegions.isEmpty()) {
+        trackPrivacyRegions(frame);
+    }
     m_lastFrame = frame;
     refreshFrame();
 }
@@ -149,9 +152,10 @@ void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
             matchRect = templateRect;
         }
 
-        const int searchRadius = qBound(8, qMin(templateRect.width(), templateRect.height()) / 2, 24);
+        const int searchRadius = qBound(6, qMin(templateRect.width(), templateRect.height()) / 3, 16);
         const int sampleStep = qBound(2, qMin(matchRect.width(), matchRect.height()) / 10, 5);
         qint64 bestScore = std::numeric_limits<qint64>::max();
+        qint64 zeroScore = std::numeric_limits<qint64>::max();
         QPoint bestDelta(0, 0);
 
         for (int dy = -searchRadius; dy <= searchRadius; dy += 2) {
@@ -173,6 +177,9 @@ void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
                 if (samples > 0) {
                     score /= samples;
                 }
+                if (dx == 0 && dy == 0) {
+                    zeroScore = score;
+                }
                 if (score < bestScore) {
                     bestScore = score;
                     bestDelta = QPoint(dx, dy);
@@ -180,8 +187,15 @@ void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
             }
         }
 
-        QRectF moved = normalized.translated(static_cast<double>(bestDelta.x()) / trackWidth,
-                                             static_cast<double>(bestDelta.y()) / trackHeight);
+        if (zeroScore == std::numeric_limits<qint64>::max()
+            || bestScore > 42
+            || (zeroScore - bestScore) < 4) {
+            tracked.append(normalized);
+            continue;
+        }
+
+        QRectF moved = normalized.translated(static_cast<double>(bestDelta.x()) * 0.85 / trackWidth,
+                                             static_cast<double>(bestDelta.y()) * 0.85 / trackHeight);
         moved = moved.intersected(QRectF(0.0, 0.0, 1.0, 1.0));
         tracked.append(moved.isEmpty() ? normalized : moved);
     }

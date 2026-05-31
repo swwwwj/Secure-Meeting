@@ -303,13 +303,14 @@ void HttpAIProcessor::processFrame(const QImage &frame)
     }
 
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    if (m_minFrameIntervalMs > 0 && m_lastFrameSentMs > 0 && (nowMs - m_lastFrameSentMs) < m_minFrameIntervalMs) {
+    const qint64 throttleBaseMs = qMax(m_lastFrameSentMs, m_lastFrameCompletedMs);
+    if (m_minFrameIntervalMs > 0 && throttleBaseMs > 0 && (nowMs - throttleBaseMs) < m_minFrameIntervalMs) {
         m_dropped += 1;
         if (m_dropped % 30 == 1) {
             logEvent("frame_dropped",
                      {{"reason", "rate_limited"},
                       {"min_frame_interval_ms", m_minFrameIntervalMs},
-                      {"elapsed_ms", nowMs - m_lastFrameSentMs}});
+                      {"elapsed_ms", nowMs - throttleBaseMs}});
         }
         logMetricsIfNeeded();
         return;
@@ -405,6 +406,7 @@ void HttpAIProcessor::postProcessRequest(const EncodedFrame &encoded)
         const double latencyMs = info.timer.isValid() ? static_cast<double>(info.timer.elapsed()) : 0.0;
         m_totalLatencyMs += latencyMs;
         m_inFlight.remove(reply);
+        m_lastFrameCompletedMs = QDateTime::currentMSecsSinceEpoch();
 
         if (!m_enabled) {
             reply->deleteLater();
@@ -507,24 +509,7 @@ void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, co
         }
     }
 
-    if (m_cachedPrivacyRegions.size() == nextRegions.size()) {
-        QVector<QRectF> smoothed;
-        smoothed.reserve(nextRegions.size());
-        constexpr double alpha = 0.65;
-        for (int i = 0; i < nextRegions.size(); ++i) {
-            const QRectF &prev = m_cachedPrivacyRegions.at(i);
-            const QRectF &next = nextRegions.at(i);
-            smoothed.append(QRectF(
-                prev.left() * (1.0 - alpha) + next.left() * alpha,
-                prev.top() * (1.0 - alpha) + next.top() * alpha,
-                prev.width() * (1.0 - alpha) + next.width() * alpha,
-                prev.height() * (1.0 - alpha) + next.height() * alpha
-            ).intersected(QRectF(0.0, 0.0, 1.0, 1.0)));
-        }
-        m_cachedPrivacyRegions = smoothed;
-    } else {
-        m_cachedPrivacyRegions = nextRegions;
-    }
+    m_cachedPrivacyRegions = nextRegions;
 
     emit privacyRegionsUpdated(m_cachedPrivacyRegions);
 }

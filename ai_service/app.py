@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -49,6 +50,8 @@ class ServiceConfig(BaseModel):
     face_provider: Literal["mock", "insightface"] = "mock"
     arcface_model_dir: str = "models/arcface"
     face_match_threshold: float = 0.45
+    face_det_size: int = 640
+    face_det_thresh: float = 0.35
     face_detect_every_n_frames: int = 2
     face_model_version: str = "arcface-phase-d-v1"
 
@@ -84,6 +87,10 @@ def _load_config() -> ServiceConfig:
         data["arcface_model_dir"] = os.getenv("SM_ARCFACE_MODEL_DIR")
     if os.getenv("SM_FACE_MATCH_THRESHOLD"):
         data["face_match_threshold"] = float(os.getenv("SM_FACE_MATCH_THRESHOLD", "0.45"))
+    if os.getenv("SM_FACE_DET_SIZE"):
+        data["face_det_size"] = int(os.getenv("SM_FACE_DET_SIZE", "640"))
+    if os.getenv("SM_FACE_DET_THRESH"):
+        data["face_det_thresh"] = float(os.getenv("SM_FACE_DET_THRESH", "0.35"))
     if os.getenv("SM_OUTPUT_IMAGE_FORMAT"):
         data["output_image_format"] = os.getenv("SM_OUTPUT_IMAGE_FORMAT")
     if os.getenv("SM_OUTPUT_JPEG_QUALITY"):
@@ -269,7 +276,12 @@ def _build_face_pipeline(gallery: FaceGallery) -> FacePrivacyPipeline:
     base_dir = Path(__file__).resolve().parent
     model_dir = str((base_dir / CONFIG.arcface_model_dir).resolve())
     if CONFIG.face_provider == "insightface":
-        recognizer = InsightFaceRecognizer(model_root=model_dir, device=CONFIG.detector_device)
+        recognizer = InsightFaceRecognizer(
+            model_root=model_dir,
+            device=CONFIG.detector_device,
+            det_size=CONFIG.face_det_size,
+            det_thresh=CONFIG.face_det_thresh,
+        )
         if not recognizer.available:
             log_event("face_recognizer_unavailable", provider="insightface", reason=recognizer.unavailable_reason)
             recognizer = MockFaceRecognizer()
@@ -288,6 +300,7 @@ METRICS = Metrics()
 FACE_GALLERY = FaceGallery()
 OBJECT_PIPELINE = _build_object_pipeline()
 FACE_PIPELINE = _build_face_pipeline(FACE_GALLERY)
+RECENT_FACE_DEBUG: deque[dict[str, Any]] = deque(maxlen=50)
 app = FastAPI(title="Secure Meeting AI Service", version="1.0.0")
 
 
@@ -441,6 +454,21 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
                     }
                     for f in face_out["faces"]
                 ]
+                if CONFIG.enable_debug_controls:
+                    RECENT_FACE_DEBUG.append(
+                        {
+                            "ts_ms": int(time.time() * 1000),
+                            "request_id": request_id,
+                            "trace_id": trace_id,
+                            "room_id": room_id,
+                            "image_width": int(image.shape[1]),
+                            "image_height": int(image.shape[0]),
+                            "whitelist_user_ids": list(req.whitelist_user_ids),
+                            "faces_detected": faces_detected,
+                            "faces_blurred": faces_blurred,
+                            "faces": faces_payload,
+                        }
+                    )
             except Exception as exc:  # pragma: no cover
                 degraded = True
                 log_event(
@@ -508,6 +536,13 @@ def health() -> dict:
 @app.get(f"{CONFIG.api_prefix}/metrics")
 def metrics() -> dict:
     return METRICS.snapshot()
+
+
+@app.get(f"{CONFIG.api_prefix}/debug/recent_faces")
+def recent_faces() -> dict:
+    if not CONFIG.enable_debug_controls:
+        raise ApiError("DEBUG_CONTROLS_DISABLED", "Debug controls are disabled in this environment", 403, str(uuid.uuid4()), str(uuid.uuid4()))
+    return {"items": list(RECENT_FACE_DEBUG)}
 
 
 @app.post(f"{CONFIG.api_prefix}/process_frame", response_model=ProcessFrameResponse)
