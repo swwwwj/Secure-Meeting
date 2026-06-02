@@ -505,7 +505,7 @@ void HttpAIProcessor::updateCachedPrivacyRegions(const QJsonObject &response, co
     for (const QJsonValue &value : faces) {
         const QJsonObject face = value.toObject();
         if (face.value("blurred").toBool(false)) {
-            appendBox(face.value("bbox").toArray(), 0.38, 0.45, 0.35);
+            appendBox(face.value("bbox").toArray(), 0.08, 0.18, 0.18);
         }
     }
 

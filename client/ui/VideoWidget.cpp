@@ -152,7 +152,7 @@ void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
             matchRect = templateRect;
         }
 
-        const int searchRadius = qBound(6, qMin(templateRect.width(), templateRect.height()) / 3, 16);
+        const int searchRadius = qBound(6, qMin(templateRect.width(), templateRect.height()) / 3, 20);
         const int sampleStep = qBound(2, qMin(matchRect.width(), matchRect.height()) / 10, 5);
         qint64 bestScore = std::numeric_limits<qint64>::max();
         qint64 zeroScore = std::numeric_limits<qint64>::max();
@@ -188,14 +188,14 @@ void VideoWidget::trackPrivacyRegions(const QImage &nextFrame)
         }
 
         if (zeroScore == std::numeric_limits<qint64>::max()
-            || bestScore > 42
-            || (zeroScore - bestScore) < 4) {
+            || bestScore > 50
+            || (zeroScore - bestScore) < 3) {
             tracked.append(normalized);
             continue;
         }
 
-        QRectF moved = normalized.translated(static_cast<double>(bestDelta.x()) * 0.85 / trackWidth,
-                                             static_cast<double>(bestDelta.y()) * 0.85 / trackHeight);
+        QRectF moved = normalized.translated(static_cast<double>(bestDelta.x()) * 1.0 / trackWidth,
+                                             static_cast<double>(bestDelta.y()) * 1.0 / trackHeight);
         moved = moved.intersected(QRectF(0.0, 0.0, 1.0, 1.0));
         tracked.append(moved.isEmpty() ? normalized : moved);
     }
