@@ -32,6 +32,11 @@ MainController::MainController(VideoSource *videoSource,
     connect(m_videoSource, &VideoSource::frameReady, this, &MainController::onRawFrameReady);
     connect(m_videoSource, &VideoSource::sourceWarning, this, &MainController::updateMeetingStatus);
     connect(m_aiProcessor, &AIProcessor::frameProcessed, this, &MainController::onProcessedFrameReady);
+    connect(m_aiProcessor, &AIProcessor::privacyRegionsUpdated, this, [this](const QVector<QRectF> &regions) {
+        if (m_view) {
+            m_view->meetingWindow()->setPrimaryPrivacyRegions(regions);
+        }
+    });
     connect(m_meetingService, &MeetingService::meetingStateChanged, this, &MainController::onMeetingStateChanged);
     if (m_cameraPermissionService) {
         connect(m_cameraPermissionService, &CameraPermissionService::cameraAccessResolved,
@@ -268,6 +273,8 @@ void MainController::onAIToggled(bool enabled)
     m_aiProcessor->setEnabled(enabled);
     if (enabled) {
         m_hasProcessedAiFrame = false;
+    } else if (m_view) {
+        m_view->meetingWindow()->setPrimaryPrivacyRegions({});
     }
     updateMeetingStatus(enabled ? "AI 处理已开启（含物体检测与 ArcFace）。" : "AI 处理已关闭。");
 }
@@ -328,7 +335,7 @@ void MainController::onRawFrameReady(const QImage &frame)
 {
     if (!m_joined || !m_cameraEnabled) return;
     const bool preferProcessedPreview = m_aiProcessor->isEnabled() && m_arcfaceEnabled;
-    if (m_view && (!preferProcessedPreview || !m_hasProcessedAiFrame)) {
+    if (m_view) {
         m_view->meetingWindow()->setPrimaryFrame(frame);
     }
     if (m_pendingSelfEnroll && m_arcfaceEnabled && !m_userName.isEmpty()) {
@@ -344,7 +351,7 @@ void MainController::onProcessedFrameReady(const QImage &frame)
 {
     m_hasProcessedAiFrame = true;
     if (m_view) {
-        m_view->meetingWindow()->setPrimaryFrame(frame);
+        m_view->meetingWindow()->setPrimaryProcessedFrame(frame);
     }
 }
 

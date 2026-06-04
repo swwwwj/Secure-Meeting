@@ -30,6 +30,8 @@ public:
     void clearPrimaryFrame();
     void setAIEnabled(bool enabled);
     void setArcFaceEnabled(bool enabled);
+    void setPrimaryPrivacyRegions(const QVector<QRectF> &regions);
+    void setPrimaryProcessedFrame(const QImage &frame);
     void setMeetingFaceProfiles(const QList<FaceProfileSummary> &profiles, const QStringList &selectedProfileKeys);
 
 signals:

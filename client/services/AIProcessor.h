@@ -41,4 +41,5 @@ public:
 
 signals:
     void frameProcessed(const QImage &frame);
+    void privacyRegionsUpdated(const QVector<QRectF> &regions);
 };

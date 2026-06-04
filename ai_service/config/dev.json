@@ -13,17 +13,19 @@
   "yolo_model_path": "training/runs/id_card/weights/best.pt",
   "detection_confidence_threshold": 0.35,
   "inference_image_size": 640,
-  "detector_timeout_ms": 220,
-  "detect_every_n_frames": 2,
+  "detector_timeout_ms": 300,
+  "detect_every_n_frames": 5,
   "bbox_smoothing_alpha": 0.7,
   "blur_method": "gaussian",
   "blur_intensity": 17,
-  "sensitive_labels": [
-    "id_card"
-  ],
+  "output_image_format": "jpeg",
+  "output_jpeg_quality": 75,
+  "sensitive_labels": ["id_card"],
   "face_provider": "insightface",
   "arcface_model_dir": "models/arcface",
   "face_match_threshold": 0.45,
-  "face_detect_every_n_frames": 2,
+  "face_det_size": 640,
+  "face_det_thresh": 0.5,
+  "face_detect_every_n_frames": 1,
   "face_model_version": "arcface-phase-d-v1"
 }

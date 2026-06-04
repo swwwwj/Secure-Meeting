@@ -207,7 +207,7 @@ class SensitiveObjectPipeline:
         self._frame_index = 0
         self._last_detections: list[Detection] = []
 
-    def process(self, image: np.ndarray) -> dict[str, Any]:
+    def process(self, image: np.ndarray, apply_blur: bool = True) -> dict[str, Any]:
         self._frame_index += 1
         if not self.sensitive_labels:
             return {
@@ -254,7 +254,13 @@ class SensitiveObjectPipeline:
         for det in detections:
             det.sensitive = det.label.lower() in self.sensitive_labels
         sensitive_detections = [det for det in detections if det.sensitive]
-        processed, blurred_count = self.protector.blur_regions(image, sensitive_detections)
+        if apply_blur:
+            processed, blurred_count = self.protector.blur_regions(image, sensitive_detections)
+        else:
+            processed = image
+            blurred_count = len(sensitive_detections)
+            for det in sensitive_detections:
+                det.blurred = True
         self._last_detections = detections
 
         return {

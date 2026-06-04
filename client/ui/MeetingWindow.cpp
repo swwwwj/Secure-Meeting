@@ -198,6 +198,20 @@ void MeetingWindow::setAIEnabled(bool enabled)
     m_aiButton->setChecked(enabled);
 }
 
+void MeetingWindow::setPrimaryPrivacyRegions(const QVector<QRectF> &regions)
+{
+    if (!m_tiles.isEmpty()) {
+        m_tiles.first()->setPrivacyRegions(regions);
+    }
+}
+
+void MeetingWindow::setPrimaryProcessedFrame(const QImage &frame)
+{
+    if (!m_tiles.isEmpty()) {
+        m_tiles.first()->setProcessedFrame(frame);
+    }
+}
+
 void MeetingWindow::setArcFaceEnabled(bool enabled)
 {
     m_arcfacePanel->setVisible(enabled);

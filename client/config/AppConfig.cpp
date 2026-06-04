@@ -40,6 +40,13 @@ AppConfig AppConfig::load()
         if (obj.contains("ai_timeout_ms")) cfg.aiTimeoutMs = obj.value("ai_timeout_ms").toInt(cfg.aiTimeoutMs);
         if (obj.contains("meeting_timeout_ms")) cfg.meetingTimeoutMs = obj.value("meeting_timeout_ms").toInt(cfg.meetingTimeoutMs);
         if (obj.contains("max_in_flight_requests")) cfg.maxInFlightRequests = obj.value("max_in_flight_requests").toInt(cfg.maxInFlightRequests);
+        if (obj.contains("ai_min_frame_interval_ms")) cfg.aiMinFrameIntervalMs = obj.value("ai_min_frame_interval_ms").toInt(cfg.aiMinFrameIntervalMs);
+        if (obj.contains("ai_transport_max_edge")) cfg.aiTransportMaxEdge = obj.value("ai_transport_max_edge").toInt(cfg.aiTransportMaxEdge);
+        if (obj.contains("ai_transport_jpeg_quality")) cfg.aiTransportJpegQuality = obj.value("ai_transport_jpeg_quality").toInt(cfg.aiTransportJpegQuality);
+        if (obj.contains("ai_processed_frame_max_age_ms")) cfg.aiProcessedFrameMaxAgeMs = obj.value("ai_processed_frame_max_age_ms").toInt(cfg.aiProcessedFrameMaxAgeMs);
+        if (obj.contains("blur_radius")) cfg.blurRadius = obj.value("blur_radius").toInt(cfg.blurRadius);
+        if (obj.contains("use_kalman_tracking")) cfg.useKalmanTracking = obj.value("use_kalman_tracking").toBool(cfg.useKalmanTracking);
+        if (obj.contains("tracking_fallback_threshold_ms")) cfg.trackingFallbackThresholdMs = obj.value("tracking_fallback_threshold_ms").toInt(cfg.trackingFallbackThresholdMs);
         if (obj.contains("model_version")) cfg.modelVersion = obj.value("model_version").toString(cfg.modelVersion);
         if (obj.contains("policy_version")) cfg.policyVersion = obj.value("policy_version").toString(cfg.policyVersion);
         }
@@ -57,6 +64,22 @@ AppConfig AppConfig::load()
     if (!modelOverride.isEmpty()) cfg.modelVersion = modelOverride;
     const QString policyOverride = qEnvironmentVariable("SM_POLICY_VERSION");
     if (!policyOverride.isEmpty()) cfg.policyVersion = policyOverride;
+    const QString minFrameIntervalOverride = qEnvironmentVariable("SM_AI_MIN_FRAME_INTERVAL_MS");
+    if (!minFrameIntervalOverride.isEmpty()) cfg.aiMinFrameIntervalMs = minFrameIntervalOverride.toInt();
+    const QString transportMaxEdgeOverride = qEnvironmentVariable("SM_AI_TRANSPORT_MAX_EDGE");
+    if (!transportMaxEdgeOverride.isEmpty()) cfg.aiTransportMaxEdge = transportMaxEdgeOverride.toInt();
+    const QString transportJpegQualityOverride = qEnvironmentVariable("SM_AI_TRANSPORT_JPEG_QUALITY");
+    if (!transportJpegQualityOverride.isEmpty()) cfg.aiTransportJpegQuality = transportJpegQualityOverride.toInt();
+    const QString maxAgeOverride = qEnvironmentVariable("SM_AI_PROCESSED_FRAME_MAX_AGE_MS");
+    if (!maxAgeOverride.isEmpty()) cfg.aiProcessedFrameMaxAgeMs = maxAgeOverride.toInt();
+    const QString blurRadiusOverride = qEnvironmentVariable("SM_BLUR_RADIUS");
+    if (!blurRadiusOverride.isEmpty()) cfg.blurRadius = blurRadiusOverride.toInt();
+    const QString kalmanOverride = qEnvironmentVariable("SM_USE_KALMAN_TRACKING");
+    if (!kalmanOverride.isEmpty()) {
+        cfg.useKalmanTracking = (kalmanOverride.compare("true", Qt::CaseInsensitive) == 0 || kalmanOverride == "1");
+    }
+    const QString fallbackOverride = qEnvironmentVariable("SM_TRACKING_FALLBACK_THRESHOLD_MS");
+    if (!fallbackOverride.isEmpty()) cfg.trackingFallbackThresholdMs = fallbackOverride.toInt();
     const QString useMockOverride = qEnvironmentVariable("SM_USE_MOCK_SERVICES");
     if (!useMockOverride.isEmpty()) {
         cfg.useMockServices = (useMockOverride.compare("true", Qt::CaseInsensitive) == 0

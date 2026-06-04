@@ -3,9 +3,16 @@
   "meeting_server_endpoint": "http://127.0.0.1:8100",
   "use_mock_services": false,
   "ai_enabled_by_default": false,
-  "ai_timeout_ms": 1200,
+  "ai_timeout_ms": 6000,
   "meeting_timeout_ms": 1500,
-  "max_in_flight_requests": 2,
+  "max_in_flight_requests": 3,
+  "ai_min_frame_interval_ms": 30,
+  "ai_transport_max_edge": 640,
+  "ai_transport_jpeg_quality": 75,
+  "ai_processed_frame_max_age_ms": 150,
+  "blur_radius": 15,
+  "use_kalman_tracking": true,
+  "tracking_fallback_threshold_ms": 200,
   "model_version": "demo-model-v1",
   "policy_version": "policy-default-v1"
 }
