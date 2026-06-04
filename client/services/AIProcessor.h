@@ -22,11 +22,13 @@ public:
     virtual void setPrivacyContext(const QString &roomId,
                                    const QStringList &whitelistUserIds,
                                    bool facePrivacyEnabled,
-                                   bool objectDetectionEnabled) {
+                                   bool objectDetectionEnabled,
+                                   const QString &privacyProtectMode = QStringLiteral("blur")) {
         Q_UNUSED(roomId);
         Q_UNUSED(whitelistUserIds);
         Q_UNUSED(facePrivacyEnabled);
         Q_UNUSED(objectDetectionEnabled);
+        Q_UNUSED(privacyProtectMode);
     }
     virtual void clearPrivacyContext() {}
     virtual void enrollFace(const QString &userId, const QImage &frame) {

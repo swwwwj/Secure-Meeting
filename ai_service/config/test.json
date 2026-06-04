@@ -25,5 +25,10 @@
   "arcface_model_dir": "models/arcface",
   "face_match_threshold": 0.45,
   "face_detect_every_n_frames": 1,
-  "face_model_version": "arcface-phase-d-v1-mock"
+  "face_model_version": "arcface-phase-d-v1-mock",
+  "default_privacy_protect_mode": "blur",
+  "perturbation_provider": "mock",
+  "perturbation_weights_path": "training/runs/adversarial_perturbation/weights/best.pt",
+  "perturbation_epsilon": 0.08,
+  "perturbation_model_version": "adv-perturb-mock-v1"
 }

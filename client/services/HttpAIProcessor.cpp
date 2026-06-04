@@ -83,17 +83,20 @@ QUrl HttpAIProcessor::apiUrl(const QString &path) const
 void HttpAIProcessor::setPrivacyContext(const QString &roomId,
                                         const QStringList &whitelistUserIds,
                                         bool facePrivacyEnabled,
-                                        bool objectDetectionEnabled)
+                                        bool objectDetectionEnabled,
+                                        const QString &privacyProtectMode)
 {
     m_roomId = roomId.trimmed();
     m_whitelistUserIds = whitelistUserIds;
     m_facePrivacyEnabled = facePrivacyEnabled;
     m_objectDetectionEnabled = objectDetectionEnabled;
+    m_privacyProtectMode = privacyProtectMode.trimmed().isEmpty() ? QStringLiteral("blur") : privacyProtectMode.trimmed();
     logEvent("privacy_context_set",
              {{"room_id", m_roomId},
               {"whitelist_count", m_whitelistUserIds.size()},
               {"face_privacy", facePrivacyEnabled},
-              {"object_detection", objectDetectionEnabled}});
+              {"object_detection", objectDetectionEnabled},
+              {"privacy_protect_mode", m_privacyProtectMode}});
     // #region debug-point F:privacy-context
     postDebugEvent("F",
                    "client/services/HttpAIProcessor.cpp:setPrivacyContext",
@@ -101,7 +104,8 @@ void HttpAIProcessor::setPrivacyContext(const QString &roomId,
                    QJsonObject{{"room_id", m_roomId},
                                {"whitelist_count", m_whitelistUserIds.size()},
                                {"face_privacy", facePrivacyEnabled},
-                               {"object_detection", objectDetectionEnabled}});
+                               {"object_detection", objectDetectionEnabled},
+                               {"privacy_protect_mode", m_privacyProtectMode}});
     // #endregion
 }
 
@@ -276,6 +280,9 @@ void HttpAIProcessor::processFrame(const QImage &frame)
     }
     body.insert("enable_face_privacy", m_facePrivacyEnabled);
     body.insert("enable_object_detection", m_objectDetectionEnabled);
+    if (m_facePrivacyEnabled && !m_privacyProtectMode.isEmpty()) {
+        body.insert("privacy_protect_mode", m_privacyProtectMode);
+    }
     // #region debug-point H:frame-send
     postDebugEvent("H",
                    "client/services/HttpAIProcessor.cpp:processFrame:send",

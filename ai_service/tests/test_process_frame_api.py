@@ -265,6 +265,34 @@ def test_face_privacy_keeps_whitelist_face_visible_and_blurs_other_faces():
     assert recognizer.embed_calls == 0
 
 
+def test_process_frame_perturbation_mode_applied():
+    client = _client_with_overrides(SM_PRIVACY_PROTECT_MODE="perturbation")
+    image_b64 = _make_image_b64()
+    room_id = "room-perturb-test"
+    client.post("/api/v1/face/clear", json={"room_id": room_id})
+
+    resp = client.post(
+        "/api/v1/process_frame",
+        json={
+            "image": image_b64,
+            "mode": "pass",
+            "room_id": room_id,
+            "whitelist_user_ids": [],
+            "enable_face_privacy": True,
+            "enable_object_detection": False,
+            "privacy_protect_mode": "perturbation",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["privacy_protect_mode"] == "perturbation"
+    assert body["faces_blurred"] >= 1
+    assert body.get("perturbation_applied") is True
+    source = _decode_image(image_b64)
+    out = _decode_image(body["image"])
+    assert not np.array_equal(out, source)
+
+
 def test_face_privacy_with_empty_whitelist_blurs_all_faces():
     recognizer = _CountingRecognizer()
     gallery = FaceGallery()

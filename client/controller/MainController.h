@@ -38,7 +38,8 @@ private slots:
                                 bool cameraOn,
                                 bool microphoneOn,
                                 const QStringList &whitelistProfileKeys,
-                                bool arcfaceEnabled);
+                                bool arcfaceEnabled,
+                                bool adversarialPerturbationEnabled);
     void onFaceProfileEnrollRequested(const QString &label, const QImage &image);
     void onRefreshFaceProfilesRequested();
     void onBackToLoginRequested();
@@ -77,6 +78,7 @@ private:
     QList<FaceProfileSummary> m_availableFaceProfiles;
     QList<FaceProfileSummary> m_meetingFaceProfiles;
     bool m_arcfaceEnabled = false;
+    bool m_perturbationEnabled = false;
     bool m_pendingSelfEnroll = false;
     bool m_hasProcessedAiFrame = false;
 };

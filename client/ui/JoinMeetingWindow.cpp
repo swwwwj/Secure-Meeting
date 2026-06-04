@@ -20,6 +20,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     , m_cameraCheck(new QCheckBox("进入会议后开启摄像头", this))
     , m_microphoneCheck(new QCheckBox("进入会议后开启麦克风", this))
     , m_arcfaceCheck(new QCheckBox("启用 ArcFace 无关人员模糊", this))
+    , m_perturbationCheck(new QCheckBox("启用对抗性扰动（实验，替代模糊）", this))
     , m_faceProfileStatusLabel(new QLabel(this))
     , m_uploadFaceButton(new QPushButton("选择照片录入我的人脸", this))
     , m_refreshProfilesButton(new QPushButton("刷新已录入用户", this))
@@ -66,6 +67,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     m_cameraCheck->setChecked(true);
     m_microphoneCheck->setChecked(true);
     m_arcfaceCheck->setChecked(true);
+    m_perturbationCheck->setChecked(false);
 
     auto *profileTitle = new QLabel("我的 ArcFace 人脸资料", card);
     profileTitle->setObjectName("sectionTitle");
@@ -91,6 +93,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     cardLayout->addWidget(m_cameraCheck);
     cardLayout->addWidget(m_microphoneCheck);
     cardLayout->addWidget(m_arcfaceCheck);
+    cardLayout->addWidget(m_perturbationCheck);
     cardLayout->addSpacing(8);
     cardLayout->addWidget(profileTitle);
     cardLayout->addWidget(m_faceNameEdit);
@@ -147,7 +150,8 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
                                   m_cameraCheck->isChecked(),
                                   m_microphoneCheck->isChecked(),
                                   selectedFaceUsers(),
-                                  m_arcfaceCheck->isChecked());
+                                  m_arcfaceCheck->isChecked(),
+                                  m_perturbationCheck->isChecked());
     });
 }
 

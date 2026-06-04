@@ -19,6 +19,7 @@ from face_pipeline import (
     InsightFaceRecognizer,
     MockFaceRecognizer,
 )
+from perturbation_pipeline import PerturbationProtector, build_face_protector
 from pipeline import MockDetector, RegionProtector, SensitiveObjectPipeline, UnavailableDetector, YOLODetector
 
 
@@ -49,6 +50,11 @@ class ServiceConfig(BaseModel):
     face_match_threshold: float = 0.45
     face_detect_every_n_frames: int = 2
     face_model_version: str = "arcface-phase-d-v1"
+    default_privacy_protect_mode: Literal["none", "blur", "perturbation", "hybrid"] = "blur"
+    perturbation_provider: Literal["mock", "learned"] = "mock"
+    perturbation_weights_path: str = "training/runs/adversarial_perturbation/weights/best.pt"
+    perturbation_epsilon: float = 0.08
+    perturbation_model_version: str = "adv-perturb-mock-v1"
 
 
 def _load_config() -> ServiceConfig:
@@ -82,6 +88,14 @@ def _load_config() -> ServiceConfig:
         data["arcface_model_dir"] = os.getenv("SM_ARCFACE_MODEL_DIR")
     if os.getenv("SM_FACE_MATCH_THRESHOLD"):
         data["face_match_threshold"] = float(os.getenv("SM_FACE_MATCH_THRESHOLD", "0.45"))
+    if os.getenv("SM_PRIVACY_PROTECT_MODE"):
+        data["default_privacy_protect_mode"] = os.getenv("SM_PRIVACY_PROTECT_MODE")
+    if os.getenv("SM_PERTURBATION_PROVIDER"):
+        data["perturbation_provider"] = os.getenv("SM_PERTURBATION_PROVIDER")
+    if os.getenv("SM_PERTURBATION_WEIGHTS_PATH"):
+        data["perturbation_weights_path"] = os.getenv("SM_PERTURBATION_WEIGHTS_PATH")
+    if os.getenv("SM_PERTURBATION_EPSILON"):
+        data["perturbation_epsilon"] = float(os.getenv("SM_PERTURBATION_EPSILON", "0.08"))
     return ServiceConfig(**data)
 
 
@@ -122,6 +136,7 @@ class ProcessFrameRequest(BaseModel):
     whitelist_user_ids: list[str] = Field(default_factory=list)
     enable_face_privacy: bool = False
     enable_object_detection: Optional[bool] = None
+    privacy_protect_mode: Optional[Literal["none", "blur", "perturbation", "hybrid"]] = None
     debug: Optional[DebugOptions] = None
 
 
@@ -166,6 +181,8 @@ class ProcessFrameResponse(BaseModel):
     faces: Optional[list[dict[str, Any]]] = None
     faces_detected: Optional[int] = None
     faces_blurred: Optional[int] = None
+    privacy_protect_mode: Optional[str] = None
+    perturbation_applied: Optional[bool] = None
 
 
 class Metrics:
@@ -257,8 +274,27 @@ def _build_object_pipeline() -> SensitiveObjectPipeline:
     )
 
 
-def _build_face_pipeline(gallery: FaceGallery) -> FacePrivacyPipeline:
-    protector = RegionProtector(blur_method=CONFIG.blur_method, blur_intensity=CONFIG.blur_intensity)
+def _resolve_privacy_protect_mode(req: ProcessFrameRequest) -> Literal["none", "blur", "perturbation", "hybrid"]:
+    if req.privacy_protect_mode:
+        return req.privacy_protect_mode
+    return CONFIG.default_privacy_protect_mode
+
+
+def _build_face_pipeline(
+    gallery: FaceGallery,
+    privacy_protect_mode: Literal["none", "blur", "perturbation", "hybrid"] = "blur",
+) -> FacePrivacyPipeline:
+    protector = build_face_protector(
+        mode=privacy_protect_mode,
+        blur_method=CONFIG.blur_method,
+        blur_intensity=CONFIG.blur_intensity,
+        perturbation_provider=CONFIG.perturbation_provider,
+        perturbation_weights_path=CONFIG.perturbation_weights_path,
+        perturbation_epsilon=CONFIG.perturbation_epsilon,
+    )
+    if isinstance(protector, PerturbationProtector) and CONFIG.perturbation_provider == "learned" and not protector.available:
+        log_event("perturbation_unavailable", provider="learned", reason=protector.unavailable_reason)
+        protector = PerturbationProtector(strength=CONFIG.perturbation_epsilon, provider="mock")
     base_dir = Path(__file__).resolve().parent
     model_dir = str((base_dir / CONFIG.arcface_model_dir).resolve())
     if CONFIG.face_provider == "insightface":
@@ -280,7 +316,7 @@ def _build_face_pipeline(gallery: FaceGallery) -> FacePrivacyPipeline:
 METRICS = Metrics()
 FACE_GALLERY = FaceGallery()
 OBJECT_PIPELINE = _build_object_pipeline()
-FACE_PIPELINE = _build_face_pipeline(FACE_GALLERY)
+FACE_PIPELINE = _build_face_pipeline(FACE_GALLERY, CONFIG.default_privacy_protect_mode)
 app = FastAPI(title="Secure Meeting AI Service", version="1.0.0")
 
 
@@ -399,9 +435,14 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
                     reason=f"object_detector_exception:{exc}",
                 )
 
+        privacy_mode = _resolve_privacy_protect_mode(req)
+        face_pipeline = FACE_PIPELINE
+        if req.enable_face_privacy and privacy_mode != CONFIG.default_privacy_protect_mode:
+            face_pipeline = _build_face_pipeline(FACE_GALLERY, privacy_mode)
+
         if req.enable_face_privacy:
             try:
-                face_out = FACE_PIPELINE.process(
+                face_out = face_pipeline.process(
                     processed,
                     room_id=room_id,
                     whitelist_user_ids=req.whitelist_user_ids,
@@ -441,6 +482,7 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
     inference_ms = (time.perf_counter() - infer_start) * 1000.0
     total_blurred = blurred_count + faces_blurred
 
+    resolved_mode = _resolve_privacy_protect_mode(req) if req.enable_face_privacy else "none"
     out = ProcessFrameResponse(
         request_id=request_id,
         trace_id=trace_id,
@@ -453,6 +495,8 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         faces=faces_payload,
         faces_detected=faces_detected,
         faces_blurred=faces_blurred,
+        privacy_protect_mode=resolved_mode,
+        perturbation_applied=resolved_mode in {"perturbation", "hybrid"} and faces_blurred > 0,
     )
     METRICS.record(
         ok=True,
@@ -484,6 +528,7 @@ def _process_impl(req: ProcessFrameRequest) -> ProcessFrameResponse:
         faces_blurred=faces_blurred,
         skipped_detection=skipped_detection,
         degraded=degraded,
+        privacy_protect_mode=resolved_mode,
     )
     return out
 

@@ -134,7 +134,8 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
                                             bool cameraOn,
                                             bool microphoneOn,
                                             const QStringList &whitelist,
-                                            bool arcfaceEnabled)
+                                            bool arcfaceEnabled,
+                                            bool adversarialPerturbationEnabled)
 {
     if (!m_view) return;
     m_meetingId = meetingId;
@@ -143,6 +144,7 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_microphoneEnabled = microphoneOn;
     m_whitelist = whitelist;
     m_arcfaceEnabled = arcfaceEnabled;
+    m_perturbationEnabled = adversarialPerturbationEnabled;
     m_pendingSelfEnroll = false;
     m_hasProcessedAiFrame = false;
 
@@ -159,7 +161,8 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_view->meetingWindow()->setParticipants(participants);
     m_view->meetingWindow()->setMeetingInfo(m_meetingId, m_userName);
     m_view->meetingWindow()->setLocalMediaState(m_cameraEnabled, m_microphoneEnabled);
-    if (m_arcfaceEnabled && !m_aiProcessor->isEnabled()) {
+    const bool facePrivacyEnabled = m_arcfaceEnabled || m_perturbationEnabled;
+    if (facePrivacyEnabled && !m_aiProcessor->isEnabled()) {
         m_aiProcessor->setEnabled(true);
     }
     m_view->meetingWindow()->setAIEnabled(m_aiProcessor->isEnabled());
@@ -169,7 +172,8 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     m_view->meetingWindow()->setArcFaceEnabled(m_arcfaceEnabled);
 
     m_aiProcessor->clearPrivacyContext();
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
     if (m_arcfaceEnabled && !m_availableFaceProfiles.isEmpty()) {
         QStringList profileKeys;
         for (const FaceProfileSummary &summary : m_availableFaceProfiles) {
@@ -184,12 +188,18 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
         }
     }
 
-    m_view->meetingWindow()->setStatusMessage(
-        m_arcfaceEnabled
-            ? (m_whitelist.isEmpty()
-                   ? "已加入会议。ArcFace 已启用，AI 已自动开启；当前未选择任何可见人脸，检测到的人脸将自动打码。"
-                   : QString("已加入会议。ArcFace 已启用，AI 已自动开启，当前允许显示 %1 个命名人脸条目。").arg(m_whitelist.size()))
-            : "已加入会议。ArcFace 未启用。");
+    QString status = QStringLiteral("已加入会议。");
+    if (m_perturbationEnabled) {
+        status += QStringLiteral(" 对抗性扰动已启用（实验）。");
+    }
+    if (m_arcfaceEnabled) {
+        status += m_whitelist.isEmpty()
+                       ? QStringLiteral(" ArcFace 已启用；未选白名单时非相关人员将受隐私保护。")
+                       : QStringLiteral(" ArcFace 已启用，当前允许显示 %1 个命名人脸条目。").arg(m_whitelist.size());
+    } else if (!m_perturbationEnabled) {
+        status += QStringLiteral(" 人脸隐私保护未启用。");
+    }
+    m_view->meetingWindow()->setStatusMessage(status);
     m_view->showMeetingPage();
 
     if (m_cameraEnabled) {
@@ -232,6 +242,7 @@ void MainController::onLeaveClicked()
     m_meetingId.clear();
     m_whitelist.clear();
     m_arcfaceEnabled = false;
+    m_perturbationEnabled = false;
     m_pendingSelfEnroll = false;
     m_hasProcessedAiFrame = false;
     if (m_view) {
@@ -303,18 +314,22 @@ void MainController::onEnrollFacesRequested(const QString &labelPrefix)
     }
     m_whitelist = selected;
     m_view->meetingWindow()->setMeetingFaceProfiles(m_meetingFaceProfiles, m_whitelist);
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    const bool facePrivacyEnabled = m_arcfaceEnabled || m_perturbationEnabled;
+    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
     updateMeetingStatus(QString("已从当前画面录入 %1 张人脸，可在列表里勾选是否显示。").arg(enrolled.size()));
 }
 
 void MainController::onMeetingWhitelistChanged(const QStringList &selectedProfileKeys)
 {
     m_whitelist = selectedProfileKeys;
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, m_arcfaceEnabled, true);
+    const bool facePrivacyEnabled = m_arcfaceEnabled || m_perturbationEnabled;
+    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
     if (m_view) {
         m_view->meetingWindow()->setStatusMessage(
             m_whitelist.isEmpty()
-                ? QStringLiteral("当前未勾选可见人脸，检测到的人脸将自动打码。")
+                ? QStringLiteral("当前未勾选可见人脸，检测到的人脸将自动保护。")
                 : QStringLiteral("当前允许显示 %1 个命名人脸条目。").arg(m_whitelist.size()));
     }
 }
@@ -327,7 +342,7 @@ void MainController::onProtectionLevelChanged(const QString &level)
 void MainController::onRawFrameReady(const QImage &frame)
 {
     if (!m_joined || !m_cameraEnabled) return;
-    const bool preferProcessedPreview = m_aiProcessor->isEnabled() && m_arcfaceEnabled;
+    const bool preferProcessedPreview = m_aiProcessor->isEnabled() && (m_arcfaceEnabled || m_perturbationEnabled);
     if (m_view && (!preferProcessedPreview || !m_hasProcessedAiFrame)) {
         m_view->meetingWindow()->setPrimaryFrame(frame);
     }

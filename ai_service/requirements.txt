@@ -8,3 +8,5 @@ ultralytics
 # Optional for Phase D ArcFace (insightface downloads buffalo_l into models/arcface):
 # insightface
 # onnxruntime
+# Optional for Phase E adversarial perturbation training / learned inference:
+# torch

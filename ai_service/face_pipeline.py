@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import cv2
 import numpy as np
@@ -203,7 +203,7 @@ class FacePrivacyPipeline:
     def __init__(
         self,
         recognizer: FaceRecognizer,
-        protector: RegionProtector,
+        protector: Optional[RegionProtector],
         gallery: FaceGallery,
         match_threshold: float,
         detect_every_n_frames: int = 1,
@@ -284,7 +284,10 @@ class FacePrivacyPipeline:
                     Detection(label="face", confidence=f.confidence, bbox=f.bbox, sensitive=True)
                     for f in to_blur
                 ]
-                processed, blurred_count = self.protector.blur_regions(image, det_list)
+                if self.protector is not None:
+                    processed, blurred_count = self.protector.blur_regions(image, det_list)
+                else:
+                    blurred_count = len(to_blur)
                 for f in to_blur:
                     f.blurred = True
 

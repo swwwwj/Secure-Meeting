@@ -56,7 +56,9 @@ public:
 
                            bool facePrivacyEnabled,
 
-                           bool objectDetectionEnabled) override;
+                           bool objectDetectionEnabled,
+
+                           const QString &privacyProtectMode = QStringLiteral("blur")) override;
 
     void clearPrivacyContext() override;
 
@@ -119,6 +121,8 @@ private:
     bool m_facePrivacyEnabled = false;
 
     bool m_objectDetectionEnabled = true;
+
+    QString m_privacyProtectMode = QStringLiteral("blur");
 
     mutable qint64 m_startedMs = 0;
 

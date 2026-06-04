@@ -29,7 +29,8 @@ signals:
                               bool cameraOn,
                               bool microphoneOn,
                               const QStringList &whitelistProfileKeys,
-                              bool arcfaceEnabled);
+                              bool arcfaceEnabled,
+                              bool adversarialPerturbationEnabled);
     void faceProfileEnrollRequested(const QString &label, const QImage &image);
     void refreshFaceProfilesRequested();
     void backToLoginRequested();
@@ -43,6 +44,7 @@ private:
     QCheckBox *m_cameraCheck;
     QCheckBox *m_microphoneCheck;
     QCheckBox *m_arcfaceCheck;
+    QCheckBox *m_perturbationCheck;
     QLabel *m_faceProfileStatusLabel;
     QPushButton *m_uploadFaceButton;
     QPushButton *m_refreshProfilesButton;
