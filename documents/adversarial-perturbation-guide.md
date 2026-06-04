@@ -13,15 +13,22 @@ Branch: `adversarial-perturbation-dev` (from `main`)
 
 Configured in `ai_service/config/*.json` as `default_privacy_protect_mode`. The client can override per frame via `privacy_protect_mode` in `process_frame`.
 
-## Training
+## Training (CPU，无需独显)
+
+训练脚本是轻量导出流程：**不跑神经网络**，只生成 `pixel_delta_v1` 权重（每张人脸 ROI 改少量像素，视觉上几乎不变）。
 
 ```bash
 cd ai_service
-pip install torch
 python -m training.train_adversarial_perturbation
 ```
 
-Optional face/selfie images under `ai_service/training/perturbation_samples/`.
+可选：把任意图片放进 `training/perturbation_samples/`（仅用于统计样本数，不参与反向传播）。
+
+```bash
+python -m training.train_adversarial_perturbation --data ./training/perturbation_samples --epochs 5
+```
+
+权重类型：`checkpoint_type: pixel_delta_v1`。推理时设置 `perturbation_provider: "learned"` 即可加载。
 
 ## Meeting client
 

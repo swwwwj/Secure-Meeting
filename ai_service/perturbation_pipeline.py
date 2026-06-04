@@ -10,6 +10,7 @@ from typing import Literal
 import cv2
 import numpy as np
 
+from perturbation_fast import apply_pixel_deltas, is_pixel_delta_checkpoint, load_checkpoint
 from pipeline import Detection, RegionProtector
 
 
@@ -21,6 +22,7 @@ class PerturbationProtector:
         self.provider = provider
         self.weights_path = weights_path
         self._generator = None
+        self._pixel_delta: dict | None = None
         self._load_error: str | None = None
         self.model_version = "adv-perturb-mock-v1"
         if provider == "learned":
@@ -30,41 +32,42 @@ class PerturbationProtector:
     def available(self) -> bool:
         if self.provider == "mock":
             return True
-        return self._generator is not None
+        return self._generator is not None or self._pixel_delta is not None
 
     @property
     def unavailable_reason(self) -> str:
         return self._load_error or "unknown"
 
     def _load_generator(self) -> None:
-        try:
-            import torch
-        except Exception as exc:  # pragma: no cover
-            self._load_error = f"torch import failed: {exc}"
-            return
-        try:
-            from perturbation_model import PerturbationGenerator
-        except Exception as exc:  # pragma: no cover
-            self._load_error = f"model import failed: {exc}"
-            return
         path = Path(self.weights_path)
         if not path.is_file():
             self._load_error = f"weights not found: {path}"
             return
         try:
-            try:
-                ckpt = torch.load(path, map_location="cpu", weights_only=False)
-            except TypeError:  # pragma: no cover - older torch
-                ckpt = torch.load(path, map_location="cpu")
-            epsilon = float(ckpt.get("epsilon", self.strength)) if isinstance(ckpt, dict) else self.strength
-            model = PerturbationGenerator(epsilon=epsilon)
-            state = ckpt.get("model_state", ckpt) if isinstance(ckpt, dict) else ckpt
-            model.load_state_dict(state)
-            model.eval()
-            self._generator = model
-            self.model_version = str(ckpt.get("model_version", "adv-perturb-learned-v1")) if isinstance(ckpt, dict) else "adv-perturb-learned-v1"
+            ckpt = load_checkpoint(path)
+            if is_pixel_delta_checkpoint(ckpt):
+                self._pixel_delta = ckpt
+                self.strength = float(ckpt.get("epsilon", self.strength))
+                self.model_version = str(ckpt.get("model_version", "adv-perturb-pixel-delta-v1"))
+                return
+            self._load_legacy_torch_weights(ckpt)
         except Exception as exc:  # pragma: no cover
             self._load_error = f"weights load failed: {exc}"
+
+    def _load_legacy_torch_weights(self, ckpt: dict) -> None:
+        try:
+            import torch
+            from perturbation_model import PerturbationGenerator
+        except Exception as exc:  # pragma: no cover
+            self._load_error = f"legacy torch weights require torch: {exc}"
+            return
+        epsilon = float(ckpt.get("epsilon", self.strength))
+        model = PerturbationGenerator(epsilon=epsilon)
+        state = ckpt.get("model_state", ckpt)
+        model.load_state_dict(state)
+        model.eval()
+        self._generator = model
+        self.model_version = str(ckpt.get("model_version", "adv-perturb-learned-v1"))
 
     def blur_regions(self, image: np.ndarray, detections: list[Detection]) -> tuple[np.ndarray, int]:
         """Same contract as RegionProtector.blur_regions for pipeline compatibility."""
@@ -90,6 +93,9 @@ class PerturbationProtector:
         return output, applied
 
     def _perturb_roi(self, roi: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        if self.provider == "learned" and self._pixel_delta is not None:
+            pixels = self._pixel_delta.get("pixels", [])
+            return apply_pixel_deltas(roi, pixels, bbox=bbox)
         if self.provider == "learned" and self._generator is not None:
             return self._perturb_learned(roi)
         return self._perturb_mock(roi, bbox)

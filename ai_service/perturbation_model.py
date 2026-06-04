@@ -1,5 +1,5 @@
 """
-Lightweight generator for learnable adversarial face perturbations (Phase E).
+Optional legacy PyTorch generator (Phase E). Default training exports pixel_delta_v1 instead.
 """
 
 from __future__ import annotations
