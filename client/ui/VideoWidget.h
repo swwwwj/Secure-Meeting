@@ -1,9 +1,11 @@
 #pragma once
 
-#include <QWidget>
 #include <QImage>
+#include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QVector>
+#include <QWidget>
 
 class QLabel;
 class QResizeEvent;
@@ -33,10 +35,11 @@ private:
     void trackPrivacyRegions(const QImage &nextFrame);
 
     struct KalmanState {
-        QPointF position;      // 中心点（归一化）
-        QPointF velocity;      // 速度（归一化/秒）
-        QSizeF size;           // 宽高（归一化）
-        qint64 lastUpdateMs = 0;
+        QPointF position;
+        QPointF velocity;
+        QSizeF size;
+        qint64 lastPredictMs = 0;
+        qint64 lastMeasureMs = 0;
         bool valid = false;
     };
 
@@ -46,18 +49,10 @@ private:
     QLabel *m_micChip;
     QImage m_lastFrame;
     QVector<QRectF> m_privacyRegions;
-
-    // 卡尔曼追踪状态
     QVector<KalmanState> m_kalmanStates;
     qint64 m_lastKalmanUpdateMs = 0;
+    qint64 m_lastPrivacyMeasureMs = 0;
     bool m_useKalmanTracking = true;
-
-    // 混合渲染：服务端帧缓存
-    QImage m_lastProcessedFrame;
-    qint64 m_lastProcessedFrameMs = 0;
-    bool m_hasProcessedFrame = false;
     int m_maxProcessedFrameAgeMs = 150;
-
-    // 高斯模糊参数
     int m_blurRadius = 15;
 };

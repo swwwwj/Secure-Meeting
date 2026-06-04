@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
-from face_pipeline import FaceBox, FaceGallery, FacePrivacyPipeline, FaceRecognizer
+from face_pipeline import FaceBox, FaceGallery, FacePrivacyPipeline, FaceRecognizer, InsightFaceRecognizer
 from pipeline import RegionProtector
 
 
@@ -213,6 +213,27 @@ def test_face_privacy_without_enrollment_blurs():
     assert resp.status_code == 200
     body = resp.json()
     assert body["faces_blurred"] >= 1
+    assert not np.array_equal(_decode_image(body["image"]), _decode_image(image_b64))
+
+
+def test_insightface_recognizer_uses_supported_get_signature():
+    class _FakeInsightFace:
+        bbox = np.array([4, 5, 20, 24], dtype=np.float32)
+        det_score = 0.91
+        normed_embedding = np.ones(512, dtype=np.float32)
+        embedding = np.ones(512, dtype=np.float32)
+
+    class _FakeApp:
+        def get(self, image, max_num=0, det_metric="default"):
+            return [_FakeInsightFace()]
+
+    recognizer = InsightFaceRecognizer(model_root="unused", det_thresh=0.5)
+    recognizer._app = _FakeApp()
+
+    faces = recognizer.detect_faces(np.zeros((32, 32, 3), dtype=np.uint8))
+
+    assert len(faces) == 1
+    assert faces[0].bbox == (4, 5, 20, 24)
 
 
 class _CountingRecognizer(FaceRecognizer):

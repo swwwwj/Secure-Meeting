@@ -12,12 +12,12 @@ struct AppConfig
     bool useMockServices = false;
     int aiTimeoutMs = 2500;
     int meetingTimeoutMs = 1500;
-    int maxInFlightRequests = 2;
-    int aiMinFrameIntervalMs = 250;
+    int maxInFlightRequests = 1;
+    int aiMinFrameIntervalMs = 80;
     int aiTransportMaxEdge = 480;
     int aiTransportJpegQuality = 75;
-    int aiProcessedFrameMaxAgeMs = 150;
-    int blurRadius = 15;
+    int aiProcessedFrameMaxAgeMs = 300;
+    int blurRadius = 35;
     bool useKalmanTracking = true;
     int trackingFallbackThresholdMs = 200;
     QString modelVersion = "demo-model-v1";

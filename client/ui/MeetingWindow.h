@@ -32,6 +32,7 @@ public:
     void setArcFaceEnabled(bool enabled);
     void setPrimaryPrivacyRegions(const QVector<QRectF> &regions);
     void setPrimaryProcessedFrame(const QImage &frame);
+    void setVideoPrivacyOptions(int blurRadius, bool useKalmanTracking, int maxProcessedFrameAgeMs);
     void setMeetingFaceProfiles(const QList<FaceProfileSummary> &profiles, const QStringList &selectedProfileKeys);
 
 signals:
@@ -63,4 +64,7 @@ private:
     QLineEdit *m_enrollFaceNameEdit;
     QPushButton *m_enrollFaceButton;
     QListWidget *m_roomFaceList;
+    int m_blurRadius = 35;
+    bool m_useKalmanTracking = true;
+    int m_maxProcessedFrameAgeMs = 300;
 };

@@ -6,8 +6,11 @@ import os
 import uuid
 import base64
 from datetime import datetime, timedelta
+from pathlib import Path
 import urllib.request
 
+from alembic import command
+from alembic.config import Config
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -240,8 +243,16 @@ def _resolve_user(
 app = FastAPI(title="Secure Meeting Server", version="0.1.0")
 
 
+def _apply_pending_migrations() -> None:
+    here = Path(__file__).resolve().parent
+    cfg = Config(str(here / "alembic.ini"))
+    cfg.set_main_option("script_location", str(here / "alembic"))
+    command.upgrade(cfg, "head")
+
+
 @app.on_event("startup")
 def on_startup() -> None:
+    _apply_pending_migrations()
     log_event("service_started", database_url=_mask_db_url(CONFIG.database_url))
 
 

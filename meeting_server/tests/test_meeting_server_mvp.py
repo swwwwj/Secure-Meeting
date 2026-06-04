@@ -30,6 +30,12 @@ def _client() -> TestClient:
     return TestClient(mod.app)
 
 
+def _client_app():
+    mod = importlib.import_module("app")
+    importlib.reload(mod)
+    return mod.app
+
+
 def _db_path_from_url(db_url: str) -> str:
     return db_url.replace("sqlite:///", "", 1)
 
@@ -194,3 +200,22 @@ def test_meeting_server_auth_required(tmp_path: Path):
     resp = client.post("/api/v1/rooms/create", json={"room_code": "x"})
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_startup_applies_pending_migrations_for_face_profiles(tmp_path: Path):
+    _prepare_test_db(tmp_path)
+    with TestClient(_client_app()) as client:
+        register = client.post("/api/v1/auth/register", json={"username": "migrate_user", "password": "migrate-pass-123"})
+        assert register.status_code == 200
+
+        login = client.post("/api/v1/auth/login", json={"username": "migrate_user", "password": "migrate-pass-123"})
+        assert login.status_code == 200
+        token = login.json()["session_token"]
+
+        face_profile = client.post(
+            "/api/v1/face-profiles/me",
+            json={"label": "默认", "image": "ZmFrZS1mYWNlLWltYWdl"},
+            headers={"x-session-token": token},
+        )
+        assert face_profile.status_code == 200
+        assert face_profile.json()["profile_key"] == "migrate_user::默认"

@@ -118,7 +118,7 @@ class InsightFaceRecognizer(FaceRecognizer):
             raise RuntimeError(self.unavailable_reason)
         self._last_embeddings.clear()
         faces: list[FaceBox] = []
-        for face in self._app.get(image, det_thresh=self.det_thresh):
+        for face in self._app.get(image):
             x1, y1, x2, y2 = [int(v) for v in face.bbox.astype(int).tolist()]
             bbox = (x1, y1, x2, y2)
             emb = np.asarray(face.normed_embedding, dtype=np.float32)

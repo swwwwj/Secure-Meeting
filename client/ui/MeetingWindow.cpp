@@ -212,6 +212,19 @@ void MeetingWindow::setPrimaryProcessedFrame(const QImage &frame)
     }
 }
 
+void MeetingWindow::setVideoPrivacyOptions(int blurRadius, bool useKalmanTracking, int maxProcessedFrameAgeMs)
+{
+    m_blurRadius = blurRadius;
+    m_useKalmanTracking = useKalmanTracking;
+    m_maxProcessedFrameAgeMs = maxProcessedFrameAgeMs;
+    for (VideoWidget *tile : m_tiles) {
+        if (!tile) continue;
+        tile->setBlurRadius(m_blurRadius);
+        tile->setUseKalmanTracking(m_useKalmanTracking);
+        tile->setMaxProcessedFrameAgeMs(m_maxProcessedFrameAgeMs);
+    }
+}
+
 void MeetingWindow::setArcFaceEnabled(bool enabled)
 {
     m_arcfacePanel->setVisible(enabled);
@@ -249,6 +262,9 @@ void MeetingWindow::rebuildGrid(const QStringList &participants)
 
     for (int i = 0; i < count; ++i) {
         auto *tile = new VideoWidget(participants[i], m_gridHost);
+        tile->setBlurRadius(m_blurRadius);
+        tile->setUseKalmanTracking(m_useKalmanTracking);
+        tile->setMaxProcessedFrameAgeMs(m_maxProcessedFrameAgeMs);
         if (i > 0) tile->setMediaState(true, true);
         m_tiles.append(tile);
         m_grid->addWidget(tile, i / cols, i % cols);

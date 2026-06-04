@@ -17,7 +17,7 @@
   "detect_every_n_frames": 5,
   "bbox_smoothing_alpha": 0.7,
   "blur_method": "gaussian",
-  "blur_intensity": 17,
+  "blur_intensity": 45,
   "output_image_format": "jpeg",
   "output_jpeg_quality": 75,
   "sensitive_labels": ["id_card"],

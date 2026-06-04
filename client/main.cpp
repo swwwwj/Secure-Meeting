@@ -8,6 +8,7 @@
 #include "services/MockNetworkService.h"
 #include "services/MockUserService.h"
 #include "ui/MainWindow.h"
+#include "ui/MeetingWindow.h"
 #include "ui/LoginWindow.h"
 #include "ui/RegisterWindow.h"
 #include "video/CameraVideoSource.h"
@@ -29,10 +30,13 @@ int main(int argc, char *argv[])
         : static_cast<VideoSource *>(&mockSource);
 
     HttpAIProcessor aiProcessor(cfg.aiEndpoint,
-                                cfg.aiTimeoutMs,
-                                cfg.maxInFlightRequests,
-                                cfg.modelVersion,
-                                cfg.policyVersion);
+                                 cfg.aiTimeoutMs,
+                                 cfg.maxInFlightRequests,
+                                 cfg.modelVersion,
+                                 cfg.policyVersion,
+                                 cfg.aiMinFrameIntervalMs,
+                                 cfg.aiTransportMaxEdge,
+                                 cfg.aiTransportJpegQuality);
     aiProcessor.setEnabled(cfg.aiEnabledByDefault);
     std::unique_ptr<UserService> userService;
     std::unique_ptr<MeetingService> meetingService;
@@ -100,6 +104,9 @@ int main(int argc, char *argv[])
                               &networkService,
                               userService.get());
     MainWindow window;
+    window.meetingWindow()->setVideoPrivacyOptions(cfg.blurRadius,
+                                                   cfg.useKalmanTracking,
+                                                   cfg.aiProcessedFrameMaxAgeMs);
     window.loginWindow()->setRuntimeMode(cfg.useMockServices ? "Mock" : "Real");
     window.registerWindow()->setRuntimeMode(cfg.useMockServices ? "Mock" : "Real");
     controller.bindView(&window);

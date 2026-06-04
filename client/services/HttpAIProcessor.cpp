@@ -128,6 +128,7 @@ void HttpAIProcessor::setPrivacyContext(const QString &roomId,
     m_objectDetectionEnabled = objectDetectionEnabled;
     m_cachedPrivacyRegions.clear();
     m_havePrivacyMetadata = false;
+    m_latestAcceptedFrameSequence = 0;
     emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     logEvent("privacy_context_set",
              {{"room_id", m_roomId},
@@ -152,6 +153,7 @@ void HttpAIProcessor::clearPrivacyContext()
         m_whitelistUserIds.clear();
         m_cachedPrivacyRegions.clear();
         m_havePrivacyMetadata = false;
+        m_latestAcceptedFrameSequence = 0;
         emit privacyRegionsUpdated(m_cachedPrivacyRegions);
         return;
     }
@@ -166,6 +168,7 @@ void HttpAIProcessor::clearPrivacyContext()
     m_whitelistUserIds.clear();
     m_cachedPrivacyRegions.clear();
     m_havePrivacyMetadata = false;
+    m_latestAcceptedFrameSequence = 0;
     emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     logEvent("privacy_context_cleared", {{"room_id", roomId}});
 }
@@ -252,6 +255,7 @@ void HttpAIProcessor::setEnabled(bool enabled)
     if (!enabled) {
         m_cachedPrivacyRegions.clear();
         m_havePrivacyMetadata = false;
+        m_latestAcceptedFrameSequence = 0;
         emit privacyRegionsUpdated(m_cachedPrivacyRegions);
     }
     logEvent("ai_toggle", {{"enabled", enabled}});
@@ -279,12 +283,10 @@ void HttpAIProcessor::processFrame(const QImage &frame)
                        "[DEBUG] processFrame bypassed because AI disabled",
                        QJsonObject{{"room_id", m_roomId}, {"face_privacy", m_facePrivacyEnabled}});
         // #endregion
-        emit frameProcessed(frame);
         return;
     }
 
     if (!m_processEndpoint.isValid()) {
-        emit frameProcessed(frame);
         return;
     }
 
@@ -369,7 +371,7 @@ void HttpAIProcessor::postProcessRequest(const EncodedFrame &encoded)
     }
     body.insert("enable_face_privacy", m_facePrivacyEnabled);
     body.insert("enable_object_detection", m_objectDetectionEnabled);
-    body.insert("return_image", true);
+    body.insert("return_image", false);
     // #region debug-point H:frame-send
     postDebugEvent("H",
                    "client/services/HttpAIProcessor.cpp:processFrame:send",
@@ -414,22 +416,23 @@ void HttpAIProcessor::postProcessRequest(const EncodedFrame &encoded)
         }
 
         if (ok) {
+            if (info.frameSequence <= m_latestAcceptedFrameSequence) {
+                logEvent("frame_stale_dropped",
+                         {{"request_id", info.requestId},
+                          {"trace_id", info.traceId},
+                          {"frame_sequence", info.frameSequence},
+                          {"latest_accepted_sequence", m_latestAcceptedFrameSequence}});
+                logMetricsIfNeeded();
+                reply->deleteLater();
+                return;
+            }
+            m_latestAcceptedFrameSequence = info.frameSequence;
             const QJsonDocument doc = QJsonDocument::fromJson(payload);
             const QJsonObject obj = doc.object();
             m_totalInferenceMs += obj.value("latency_ms").toDouble(0.0);
             updateCachedPrivacyRegions(obj, info.transportSize);
 
             // 解析服务端返回的高斯模糊帧，用于混合渲染
-            const QString imageBase64 = obj.value("image").toString();
-            if (!imageBase64.isEmpty()) {
-                QImage processedFrame;
-                processedFrame.loadFromData(QByteArray::fromBase64(imageBase64.toLatin1()));
-                if (!processedFrame.isNull()) {
-                    m_lastProcessedFrame = processedFrame;
-                    m_lastProcessedFrameMs = QDateTime::currentMSecsSinceEpoch();
-                    emit frameProcessed(processedFrame);
-                }
-            }
             m_framesOut += 1;
             if (m_framesOut % 30 == 0) {
                 logEvent("frame_ok",

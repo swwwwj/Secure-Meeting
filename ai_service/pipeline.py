@@ -108,6 +108,14 @@ class RegionProtector:
             if not det.sensitive:
                 continue
             x1, y1, x2, y2 = det.bbox
+            box_w = max(1, x2 - x1)
+            box_h = max(1, y2 - y1)
+            pad_x = max(2, int(box_w * 0.12))
+            pad_y = max(2, int(box_h * 0.18))
+            x1 -= pad_x
+            x2 += pad_x
+            y1 -= pad_y
+            y2 += pad_y
             x1 = max(0, min(x1, w - 1))
             y1 = max(0, min(y1, h - 1))
             x2 = max(0, min(x2, w))
@@ -129,7 +137,8 @@ class RegionProtector:
         k = self.blur_intensity
         if k % 2 == 0:
             k += 1
-        return cv2.GaussianBlur(roi, (k, k), sigmaX=0)
+        blurred = cv2.GaussianBlur(roi, (k, k), sigmaX=0)
+        return cv2.GaussianBlur(blurred, (k, k), sigmaX=0)
 
     def _mosaic(self, roi: np.ndarray) -> np.ndarray:
         h, w = roi.shape[:2]

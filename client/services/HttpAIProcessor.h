@@ -177,11 +177,9 @@ private:
     qint64 m_lastFrameCompletedMs = 0;
 
     qint64 m_nextFrameSequence = 0;
+    qint64 m_latestAcceptedFrameSequence = 0;
 
     bool m_encodeInFlight = false;
-
-    QImage m_lastProcessedFrame;
-    qint64 m_lastProcessedFrameMs = 0;
 
 };
 
