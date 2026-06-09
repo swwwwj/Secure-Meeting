@@ -28,7 +28,7 @@
   "face_model_version": "arcface-phase-d-v1-mock",
   "default_privacy_protect_mode": "blur",
   "perturbation_provider": "mock",
-  "perturbation_weights_path": "training/runs/adversarial_perturbation/weights/best.pt",
+  "perturbation_weights_path": "models/perturbation/best.pt",
   "perturbation_epsilon": 0.08,
   "perturbation_model_version": "adv-perturb-mock-v1"
 }

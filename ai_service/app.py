@@ -52,7 +52,7 @@ class ServiceConfig(BaseModel):
     face_model_version: str = "arcface-phase-d-v1"
     default_privacy_protect_mode: Literal["none", "blur", "perturbation", "hybrid"] = "blur"
     perturbation_provider: Literal["mock", "learned"] = "mock"
-    perturbation_weights_path: str = "training/runs/adversarial_perturbation/weights/best.pt"
+    perturbation_weights_path: str = "models/perturbation/best.pt"
     perturbation_epsilon: float = 0.08
     perturbation_model_version: str = "adv-perturb-mock-v1"
 

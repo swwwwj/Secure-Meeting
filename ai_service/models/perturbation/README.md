@@ -1,6 +1,10 @@
 # Adversarial perturbation weights (Phase E)
 
-Place trained generator weights here, or use the default training output path:
+Default weights shipped in repo:
+
+`ai_service/models/perturbation/best.pt`
+
+Re-export after training (optional):
 
 `ai_service/training/runs/adversarial_perturbation/weights/best.pt`
 
