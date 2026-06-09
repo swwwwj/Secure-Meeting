@@ -20,7 +20,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     , m_cameraCheck(new QCheckBox("进入会议后开启摄像头", this))
     , m_microphoneCheck(new QCheckBox("进入会议后开启麦克风", this))
     , m_arcfaceCheck(new QCheckBox("启用 ArcFace 无关人员模糊", this))
-    , m_perturbationCheck(new QCheckBox("启用对抗性扰动（实验，替代模糊）", this))
+    , m_perturbationCheck(new QCheckBox("启用对抗性扰动", this))
     , m_faceProfileStatusLabel(new QLabel(this))
     , m_uploadFaceButton(new QPushButton("选择照片录入我的人脸", this))
     , m_refreshProfilesButton(new QPushButton("刷新已录入用户", this))
@@ -58,10 +58,10 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     m_displayNameEdit->setPlaceholderText("入会名称");
     m_displayNameEdit->setFixedHeight(40);
     m_meetingIdEdit->setObjectName("inputField");
-    m_meetingIdEdit->setPlaceholderText("会议号（默认 secure-room-001）");
+    m_meetingIdEdit->setPlaceholderText("会议号");
     m_meetingIdEdit->setFixedHeight(40);
     m_faceNameEdit->setObjectName("inputField");
-    m_faceNameEdit->setPlaceholderText("人脸命名（单张直接使用；多张时作为前缀，可留空使用文件名）");
+    m_faceNameEdit->setPlaceholderText("人脸命名");
     m_faceNameEdit->setFixedHeight(40);
 
     m_cameraCheck->setChecked(true);
@@ -81,7 +81,7 @@ JoinMeetingWindow::JoinMeetingWindow(QWidget *parent)
     profileRow->addWidget(m_uploadFaceButton);
     profileRow->addWidget(m_refreshProfilesButton);
 
-    auto *wlTitle = new QLabel("会议可见人脸名单（仅选中的已录入用户不打码）", card);
+    auto *wlTitle = new QLabel("会议可见人脸名单", card);
     wlTitle->setObjectName("sectionTitle");
     m_faceProfileList->setSelectionMode(QAbstractItemView::NoSelection);
 

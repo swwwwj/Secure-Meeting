@@ -190,7 +190,7 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
 
     QString status = QStringLiteral("已加入会议。");
     if (m_perturbationEnabled) {
-        status += QStringLiteral(" 对抗性扰动已启用（实验）。");
+        status += QStringLiteral(" 对抗性扰动已启用。");
     }
     if (m_arcfaceEnabled) {
         status += m_whitelist.isEmpty()
@@ -271,7 +271,7 @@ void MainController::onMicrophoneToggled(bool enabled)
 {
     m_microphoneEnabled = enabled;
     if (m_view) m_view->meetingWindow()->setLocalMediaState(m_cameraEnabled, m_microphoneEnabled);
-    updateMeetingStatus(enabled ? "麦克风已开启（演示模式）。" : "麦克风已静音（演示模式）。");
+    updateMeetingStatus(enabled ? "麦克风已开启。" : "麦克风已静音。");
 }
 
 void MainController::onAIToggled(bool enabled)
@@ -280,7 +280,7 @@ void MainController::onAIToggled(bool enabled)
     if (enabled) {
         m_hasProcessedAiFrame = false;
     }
-    updateMeetingStatus(enabled ? "AI 处理已开启（含物体检测与 ArcFace）。" : "AI 处理已关闭。");
+    updateMeetingStatus(enabled ? "AI 处理已开启。" : "AI 处理已关闭。");
 }
 
 void MainController::onEnrollFacesRequested(const QString &labelPrefix)
