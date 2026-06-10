@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   ai-service-tests:
@@ -81,3 +85,27 @@ jobs:
           SM_MEETING_DATABASE_URL: sqlite:///./ci_migration_check.db
           SM_API_PREFIX: /api/v1
         run: python -m alembic upgrade head
+
+  client-build:
+    name: Client Build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Qt and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            g++ \
+            ninja-build \
+            qt6-base-dev \
+            qt6-multimedia-dev
+
+      - name: Configure client
+        run: cmake -S . -B build-client -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build client
+        run: cmake --build build-client --config Release
