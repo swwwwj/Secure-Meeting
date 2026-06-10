@@ -194,3 +194,25 @@ def test_meeting_server_auth_required(tmp_path: Path):
     resp = client.post("/api/v1/rooms/create", json={"room_code": "x"})
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_face_profile_upload_does_not_expose_debug_event_hook(tmp_path: Path):
+    _prepare_test_db(tmp_path)
+    _run_migrations()
+    mod = importlib.import_module("app")
+    importlib.reload(mod)
+
+    assert not hasattr(mod, "_post_debug_event")
+    client = TestClient(mod.app)
+
+    register = client.post("/api/v1/auth/register", json={"username": "debug", "password": "debug-pass-123"})
+    assert register.status_code == 200
+    login = client.post("/api/v1/auth/login", json={"username": "debug", "password": "debug-pass-123"})
+    assert login.status_code == 200
+
+    upload = client.post(
+        "/api/v1/face-profiles/me",
+        json={"label": "default", "image": "ZmFrZS1mYWNlLWltYWdl"},
+        headers={"x-session-token": login.json()["session_token"]},
+    )
+    assert upload.status_code == 200
