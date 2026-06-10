@@ -236,7 +236,7 @@ void MainController::onLeaveClicked()
     if (m_joined) {
         m_meetingService->leaveMeeting();
     }
-    m_userService->logout();
+  
     m_aiProcessor->clearPrivacyContext();
     m_joined = false;
     m_meetingId.clear();
@@ -247,8 +247,8 @@ void MainController::onLeaveClicked()
     m_hasProcessedAiFrame = false;
     if (m_view) {
         m_view->meetingWindow()->clearPrimaryFrame();
-        m_view->loginWindow()->setErrorMessage(QString());
-        m_view->showLoginPage();
+        m_view->joinWindow()->setNotice(QString());
+        m_view->showJoinPage();
     }
 }
 
