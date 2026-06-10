@@ -167,26 +167,12 @@ void MainController::onJoinMeetingRequested(const QString &meetingId,
     }
     m_view->meetingWindow()->setAIEnabled(m_aiProcessor->isEnabled());
 
-    m_meetingFaceProfiles = m_availableFaceProfiles;
-    m_view->meetingWindow()->setMeetingFaceProfiles(m_meetingFaceProfiles, m_whitelist);
+    syncMeetingFaceProfiles();
     m_view->meetingWindow()->setArcFaceEnabled(m_arcfaceEnabled);
 
     m_aiProcessor->clearPrivacyContext();
-    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
-    if (m_arcfaceEnabled && !m_availableFaceProfiles.isEmpty()) {
-        QStringList profileKeys;
-        for (const FaceProfileSummary &summary : m_availableFaceProfiles) {
-            profileKeys << summary.profileKey;
-        }
-        const QList<FaceProfileRecord> profiles = m_userService->fetchFaceProfiles(profileKeys);
-        for (const FaceProfileRecord &profile : profiles) {
-            const QImage image = imageFromBase64(profile.imageBase64);
-            if (!image.isNull()) {
-                m_aiProcessor->enrollFace(profile.profileKey, image);
-            }
-        }
-    }
+    updatePrivacyContext();
+    syncFaceProfilesToAiProcessor();
 
     QString status = QStringLiteral("已加入会议。");
     if (m_perturbationEnabled) {
@@ -277,9 +263,20 @@ void MainController::onMicrophoneToggled(bool enabled)
 void MainController::onAIToggled(bool enabled)
 {
     m_aiProcessor->setEnabled(enabled);
+    m_arcfaceEnabled = enabled;
     if (enabled) {
         m_hasProcessedAiFrame = false;
     }
+    if (m_view) {
+        if (enabled) {
+            syncMeetingFaceProfiles();
+        }
+        m_view->meetingWindow()->setArcFaceEnabled(enabled);
+    }
+    if (enabled) {
+        syncFaceProfilesToAiProcessor();
+    }
+    updatePrivacyContext();
     updateMeetingStatus(enabled ? "AI 处理已开启。" : "AI 处理已关闭。");
 }
 
@@ -314,18 +311,14 @@ void MainController::onEnrollFacesRequested(const QString &labelPrefix)
     }
     m_whitelist = selected;
     m_view->meetingWindow()->setMeetingFaceProfiles(m_meetingFaceProfiles, m_whitelist);
-    const bool facePrivacyEnabled = m_arcfaceEnabled || m_perturbationEnabled;
-    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
+    updatePrivacyContext();
     updateMeetingStatus(QString("已从当前画面录入 %1 张人脸，可在列表里勾选是否显示。").arg(enrolled.size()));
 }
 
 void MainController::onMeetingWhitelistChanged(const QStringList &selectedProfileKeys)
 {
     m_whitelist = selectedProfileKeys;
-    const bool facePrivacyEnabled = m_arcfaceEnabled || m_perturbationEnabled;
-    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
-    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
+    updatePrivacyContext();
     if (m_view) {
         m_view->meetingWindow()->setStatusMessage(
             m_whitelist.isEmpty()
@@ -428,6 +421,47 @@ void MainController::updateMeetingStatus(const QString &message) const
     if (m_view) {
         m_view->meetingWindow()->setStatusMessage(message);
     }
+}
+
+void MainController::syncMeetingFaceProfiles()
+{
+    m_meetingFaceProfiles = m_availableFaceProfiles;
+    if (m_view) {
+        m_view->meetingWindow()->setMeetingFaceProfiles(m_meetingFaceProfiles, m_whitelist);
+    }
+}
+
+void MainController::syncFaceProfilesToAiProcessor()
+{
+    if (!m_arcfaceEnabled || m_availableFaceProfiles.isEmpty()) {
+        return;
+    }
+
+    QStringList profileKeys;
+    for (const FaceProfileSummary &summary : m_availableFaceProfiles) {
+        const QString profileKey = summary.profileKey.trimmed();
+        if (!profileKey.isEmpty()) {
+            profileKeys << profileKey;
+        }
+    }
+    if (profileKeys.isEmpty()) {
+        return;
+    }
+
+    const QList<FaceProfileRecord> profiles = m_userService->fetchFaceProfiles(profileKeys);
+    for (const FaceProfileRecord &profile : profiles) {
+        const QImage image = imageFromBase64(profile.imageBase64);
+        if (!image.isNull()) {
+            m_aiProcessor->enrollFace(profile.profileKey, image);
+        }
+    }
+}
+
+void MainController::updatePrivacyContext()
+{
+    const bool facePrivacyEnabled = m_aiProcessor->isEnabled() && (m_arcfaceEnabled || m_perturbationEnabled);
+    const QString privacyMode = m_perturbationEnabled ? QStringLiteral("perturbation") : QStringLiteral("blur");
+    m_aiProcessor->setPrivacyContext(m_meetingId, m_whitelist, facePrivacyEnabled, true, privacyMode);
 }
 
 void MainController::refreshFaceProfiles(const QString &statusMessage)

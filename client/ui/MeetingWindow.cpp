@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -195,6 +196,7 @@ void MeetingWindow::clearPrimaryFrame()
 
 void MeetingWindow::setAIEnabled(bool enabled)
 {
+    const QSignalBlocker blocker(m_aiButton);
     m_aiButton->setChecked(enabled);
 }
 

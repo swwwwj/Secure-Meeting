@@ -6,7 +6,6 @@ import os
 import uuid
 import base64
 from datetime import datetime, timedelta
-import urllib.request
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
@@ -127,40 +126,6 @@ def _normalize_face_label(label: str | None) -> str:
 
 def _profile_key(username: str, label: str) -> str:
     return f"{username}::{label}"
-
-
-# #region debug-point D:meeting-server-face-profiles
-def _post_debug_event(hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    server_url = "http://127.0.0.1:7777/event"
-    session_id = "face-profile-upload"
-    try:
-        with open(".dbg/face-profile-upload.env", "r", encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("DEBUG_SERVER_URL="):
-                    server_url = line.split("=", 1)[1].strip()
-                elif line.startswith("DEBUG_SESSION_ID="):
-                    session_id = line.split("=", 1)[1].strip()
-    except Exception:
-        pass
-    payload = {
-        "sessionId": session_id,
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "msg": message,
-        "data": data,
-    }
-    try:
-        urllib.request.urlopen(
-            urllib.request.Request(
-                server_url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-            )
-        ).read()
-    except Exception:
-        pass
-# #endregion
 
 
 def _audit_failure(
@@ -383,15 +348,6 @@ def upsert_face_profile(
 ) -> dict:
     request_id = _rid(req.request_id)
     trace_id = _tid(req.trace_id)
-    # #region debug-point D:face-profile-upsert
-    _post_debug_event(
-        "D",
-        "meeting_server/app.py:upsert_face_profile",
-        "[DEBUG] face profile upsert invoked",
-        {"request_id": request_id, "trace_id": trace_id, "token_empty": not bool(x_session_token), "image_len": len(req.image or ""),
-         "label": req.label or ""},
-    )
-    # #endregion
     user = _resolve_user(db, x_session_token, request_id, trace_id, "face-profiles/me")
     image_base64 = _validate_face_image(req.image, request_id, trace_id)
     profile_name = _normalize_face_label(req.label)
@@ -419,14 +375,6 @@ def upsert_face_profile(
 
     add_audit_event(db, event_type, user.id, None, request_id, trace_id, {"username": user.username})
     db.commit()
-    # #region debug-point D:face-profile-upsert-ok
-    _post_debug_event(
-        "D",
-        "meeting_server/app.py:upsert_face_profile:ok",
-        "[DEBUG] face profile upsert succeeded",
-        {"request_id": request_id, "trace_id": trace_id, "username": user.username, "label": profile_name, "event_type": event_type},
-    )
-    # #endregion
     return {
         "request_id": request_id,
         "trace_id": trace_id,
@@ -445,14 +393,6 @@ def list_face_profiles(
 ) -> dict:
     request_id = str(uuid.uuid4())
     trace_id = str(uuid.uuid4())
-    # #region debug-point E:list-face-profiles
-    _post_debug_event(
-        "E",
-        "meeting_server/app.py:list_face_profiles",
-        "[DEBUG] list face profiles invoked",
-        {"request_id": request_id, "trace_id": trace_id, "token_empty": not bool(x_session_token)},
-    )
-    # #endregion
     _resolve_user(db, x_session_token, request_id, trace_id, "face-profiles")
     rows = db.execute(
         select(User.username, FaceProfileEntry.profile_name, FaceProfileEntry.updated_at)
@@ -465,14 +405,6 @@ def list_face_profiles(
         else FaceProfileSummary(profile_key=_profile_key(username, label), username=username, label=label, updated_at=_iso(updated_at)).dict()
         for username, label, updated_at in rows
     ]
-    # #region debug-point E:list-face-profiles-ok
-    _post_debug_event(
-        "E",
-        "meeting_server/app.py:list_face_profiles:ok",
-        "[DEBUG] list face profiles succeeded",
-        {"request_id": request_id, "trace_id": trace_id, "profile_count": len(profiles)},
-    )
-    # #endregion
     return {"request_id": request_id, "trace_id": trace_id, "profiles": profiles}
 
 

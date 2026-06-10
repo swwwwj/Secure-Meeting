@@ -58,6 +58,9 @@ private slots:
 private:
     void startCameraIfAllowed();
     void updateMeetingStatus(const QString &message) const;
+    void syncMeetingFaceProfiles();
+    void syncFaceProfilesToAiProcessor();
+    void updatePrivacyContext();
     void refreshFaceProfiles(const QString &statusMessage = QString());
     static QImage imageFromBase64(const QString &imageBase64);
 
